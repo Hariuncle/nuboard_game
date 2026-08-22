@@ -168,7 +168,29 @@ def workflow_for(template: dict[str, Any], shot: dict[str, Any]) -> dict[str, An
 
     for subgraph in graph.get("definitions", {}).get("subgraphs", []):
         for inner in subgraph.get("nodes", []):
-            if inner.get("id") == 121 and inner.get("type") == "LoraLoaderModelOnly":
+            inner_id = inner.get("id")
+            inner_type = inner.get("type")
+            # Comfy MCP currently expands the subgraph from these inner widget
+            # defaults. Updating only the outer group widgets leaves the
+            # official template's vaporwave COMFYUI demo prompt active.
+            if inner_id == 104 and inner_type == "MiniMaxH3ImageToVideo":
+                inner["widgets_values"] = [shot["prompt"], 1344, 768, 124]
+                inner["widgets_values_named"] = {
+                    "prompt": shot["prompt"],
+                    "width": 1344,
+                    "height": 768,
+                    "length": 124,
+                }
+            elif inner_id == 111 and inner_type == "PrimitiveFloat":
+                inner["widgets_values"] = [5]
+                inner["widgets_values_named"] = {"value": 5}
+            elif inner_id == 15 and inner_type == "RandomNoise":
+                inner["widgets_values"] = [shot["seed"], "fixed"]
+                inner["widgets_values_named"] = {
+                    "noise_seed": shot["seed"],
+                    "control_after_generate": "fixed",
+                }
+            elif inner_id == 121 and inner_type == "LoraLoaderModelOnly":
                 inner["widgets_values"] = [KT_INACTIVE_LORA, 1]
                 inner["widgets_values_named"] = {
                     "lora_name": KT_INACTIVE_LORA,
