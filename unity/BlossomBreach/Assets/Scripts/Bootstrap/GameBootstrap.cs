@@ -185,8 +185,8 @@ namespace BlossomBreach
                 Debug.Log(
                     $"인트로 영상 재생 시작: player={player.width}x{player.height}, " +
                     $"display={DescribeTexture(displayTarget)}, screen={DescribeTexture(screen.texture)}.");
-                float skipEnabledAt = Time.realtimeSinceStartup + IntroSkipGraceSeconds;
-                bool releaseObserved = false;
+                float playbackStartedAt = Time.realtimeSinceStartup;
+                var skipGuard = new IntroSkipGuard(IntroSkipGraceSeconds);
                 while (!skipIntro && !introFailed)
                 {
                     UpdateMenuReticle(menuReticle);
@@ -209,20 +209,23 @@ namespace BlossomBreach
                         }
                     }
 
-                    if (Time.realtimeSinceStartup >= skipEnabledAt)
+                    bool triggerPressed = TryGetIntroSkipPress(out Vector2 pressPosition);
+                    bool hasPointerPosition = triggerPressed || TryGetIntroPointerPosition(out pressPosition);
+                    bool pointerInsideTarget = hasPointerPosition &&
+                                               RectTransformUtility.RectangleContainsScreenPoint(
+                                                   skipTarget,
+                                                   pressPosition,
+                                                   null);
+                    if (skipGuard.TryAccept(
+                            Time.realtimeSinceStartup - playbackStartedAt,
+                            IsIntroSkipHeld(),
+                            triggerPressed,
+                            pointerInsideTarget))
                     {
-                        if (!releaseObserved)
-                        {
-                            releaseObserved = !IsIntroSkipHeld();
-                        }
-                        else if (TryGetIntroSkipPress(out Vector2 pressPosition) &&
-                                 RectTransformUtility.RectangleContainsScreenPoint(skipTarget, pressPosition, null))
-                        {
-                            skipIntro = true;
-                            Debug.Log(
-                                $"인트로 건너뛰기: 방아쇠를 놓은 뒤 우측 하단 버튼 입력. " +
-                                $"frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}.");
-                        }
+                        skipIntro = true;
+                        Debug.Log(
+                            $"인트로 건너뛰기: 표적 밖을 조준한 뒤 우측 하단 버튼 입력. " +
+                            $"frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}.");
                     }
                     yield return null;
                 }
@@ -459,6 +462,24 @@ namespace BlossomBreach
                 return true;
             }
 
+            return false;
+        }
+
+        private static bool TryGetIntroPointerPosition(out Vector2 screenPosition)
+        {
+            if (Mouse.current != null)
+            {
+                screenPosition = Mouse.current.position.ReadValue();
+                return true;
+            }
+
+            if (Touchscreen.current != null)
+            {
+                screenPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+                return true;
+            }
+
+            screenPosition = default;
             return false;
         }
 
