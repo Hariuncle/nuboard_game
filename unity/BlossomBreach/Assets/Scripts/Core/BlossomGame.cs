@@ -54,6 +54,12 @@ namespace BlossomBreach
         [SerializeField] private float laneWidth = 2.25f;
         [SerializeField] private float enemyHeight = 0f;
 
+        [Header("Screen-space Approach")]
+        [SerializeField, Range(0f, 1f)] private float farViewportYMin = 0.78f;
+        [SerializeField, Range(0f, 1f)] private float farViewportYMax = 0.88f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMin = 0.42f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMax = 0.55f;
+
         [Header("Tuning")]
         [SerializeField] private int startingPurity = 100;
         [SerializeField] private float scoutSpeed = 3.7f;
@@ -86,6 +92,7 @@ namespace BlossomBreach
         public int Combo { get; private set; }
         public int OverdriveShots { get; private set; }
         public Vector2 AimViewport { get; private set; } = new Vector2(0.5f, 0.5f);
+        public float SpawnZ => spawnZ;
         public float BreachZ => breachZ;
         private int EffectiveActiveCap => Mathf.Clamp(maxActiveEnemies, 1, 6);
         public bool IsRunning => _sessionRunning;
@@ -425,7 +432,15 @@ namespace BlossomBreach
             }
 
             float lane = ChooseOpenLane();
-            enemyObject.transform.position = new Vector3(lane * laneWidth, enemyHeight, spawnZ);
+            float farViewportY = UnityEngine.Random.Range(
+                Mathf.Min(farViewportYMin, farViewportYMax),
+                Mathf.Max(farViewportYMin, farViewportYMax));
+            float nearViewportY = UnityEngine.Random.Range(
+                Mathf.Min(nearViewportYMin, nearViewportYMax),
+                Mathf.Max(nearViewportYMin, nearViewportYMax));
+            float laneX = lane * laneWidth;
+            float spawnHeight = WorldHeightForViewportY(laneX, spawnZ, farViewportY, enemyHeight);
+            enemyObject.transform.position = new Vector3(laneX, spawnHeight, spawnZ);
             enemyObject.transform.rotation = Quaternion.identity;
 
             EnemyActor actor = enemyObject.GetComponent<EnemyActor>();
@@ -434,8 +449,66 @@ namespace BlossomBreach
                 actor = enemyObject.AddComponent<EnemyActor>();
             }
 
-            actor.Configure(this, kind, SpeedFor(kind), UnityEngine.Random.Range(0f, Mathf.PI * 2f));
+            actor.Configure(
+                this,
+                kind,
+                SpeedFor(kind),
+                UnityEngine.Random.Range(0f, Mathf.PI * 2f),
+                farViewportY,
+                nearViewportY);
             _activeEnemies.Add(actor);
+            return true;
+        }
+
+        internal float WorldHeightForViewportY(
+            float worldX,
+            float worldZ,
+            float viewportY,
+            float fallbackHeight)
+        {
+            if (gameplayCamera == null)
+            {
+                return fallbackHeight;
+            }
+
+            // Intersect the viewport row's left/right rays with the requested Z plane,
+            // then solve the viewport X that preserves the actor's world-space lane.
+            // This keeps screen Y deterministic without turning depth movement into a
+            // camera-relative approximation or making enemies cross lanes.
+            Ray leftRay = gameplayCamera.ViewportPointToRay(new Vector3(0f, viewportY, 0f));
+            Ray rightRay = gameplayCamera.ViewportPointToRay(new Vector3(1f, viewportY, 0f));
+            if (!TryIntersectZPlane(leftRay, worldZ, out Vector3 leftPoint) ||
+                !TryIntersectZPlane(rightRay, worldZ, out Vector3 rightPoint))
+            {
+                return fallbackHeight;
+            }
+
+            float rowWidth = rightPoint.x - leftPoint.x;
+            float viewportX = Mathf.Abs(rowWidth) < 0.001f
+                ? 0.5f
+                : (worldX - leftPoint.x) / rowWidth;
+            Ray targetRay = gameplayCamera.ViewportPointToRay(new Vector3(viewportX, viewportY, 0f));
+            return TryIntersectZPlane(targetRay, worldZ, out Vector3 targetPoint)
+                ? targetPoint.y
+                : fallbackHeight;
+        }
+
+        private static bool TryIntersectZPlane(Ray ray, float worldZ, out Vector3 point)
+        {
+            if (Mathf.Abs(ray.direction.z) < 0.0001f)
+            {
+                point = default;
+                return false;
+            }
+
+            float distance = (worldZ - ray.origin.z) / ray.direction.z;
+            if (distance <= 0f)
+            {
+                point = default;
+                return false;
+            }
+
+            point = ray.GetPoint(distance);
             return true;
         }
 

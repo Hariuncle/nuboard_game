@@ -32,7 +32,7 @@ OptionalEnemyModelAdapter.RegisterBomberPrefab(acornBomberPrefab);
 `OptionalEnemyModelAdapter` normalizes the model to the procedural character
 height, disables imported colliders, keeps the glowing procedural weak point,
 and uses shared imported materials. It permits at most four external instances.
-Models over 12,000 triangles or four shared materials are rejected and the
+Models over 20,000 triangles or four shared materials are rejected and the
 procedural Acorn Bomber remains visible.
 
 ## Animator states

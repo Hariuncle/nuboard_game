@@ -5,28 +5,66 @@ using UnityEngine.Rendering;
 namespace BlossomBreach
 {
     /// <summary>
-    /// Optional presentation-only bridge for an optimized Meshy Acorn Bomber model.
+    /// Optional presentation-only bridge for optimized Meshy enemy models.
     /// Gameplay colliders and the procedural weak point remain authoritative.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class OptionalEnemyModelAdapter : MonoBehaviour
     {
         private const int MaxExternalInstances = 4;
-        private const int MaxTrianglesPerInstance = 12000;
+        private const int MaxTrianglesPerInstance = 20000;
         private const int MaxSharedMaterials = 4;
-        private const float TargetModelHeight = 2.15f;
+        private const string ExternalModelName = "Optional Meshy Model";
 
-        private static readonly string[] ResourceCandidates =
-        {
-            "Meshy/AcornBomber/AcornBomber_Optimized",
-            "Meshy/AcornBomber/AcornBomber"
-        };
+        private static readonly ModelSpec ScoutSpec = new ModelSpec(
+            "Premium Scout", 2.15f,
+            new[] { "Meshy/PremiumScout/PremiumScout_Optimized" },
+            new[]
+            {
+                "Assets/ExternalAssets/Meshy/PremiumScoutOptimized/PremiumScout_Optimized.prefab",
+                "Assets/ExternalAssets/Meshy/PremiumScoutOptimized/PremiumScout_Optimized.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumScoutOptimized/model.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumScout/PremiumScout_Optimized.fbx"
+            });
+
+        private static readonly ModelSpec ArmoredSpec = new ModelSpec(
+            "Premium Armored", 2.25f,
+            new[] { "Meshy/PremiumArmored/PremiumArmored_Optimized" },
+            new[]
+            {
+                "Assets/ExternalAssets/Meshy/PremiumArmoredOptimized/PremiumArmored_Optimized.prefab",
+                "Assets/ExternalAssets/Meshy/PremiumArmoredOptimized/PremiumArmored_Optimized.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumArmoredOptimized/model.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumArmored/PremiumArmored_Optimized.fbx"
+            });
+
+        private static readonly ModelSpec BomberSpec = new ModelSpec(
+            "Acorn Bomber", 2.15f,
+            new[] { "Meshy/AcornBomber/AcornBomber_Optimized", "Meshy/AcornBomber/AcornBomber" },
+            new[]
+            {
+                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/AcornBomber_Optimized.prefab",
+                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/AcornBomber_Optimized.fbx",
+                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/model.fbx",
+                "Assets/ExternalAssets/Meshy/AcornBomber/AcornBomber_Optimized.fbx"
+            });
+
+        private static readonly ModelSpec BossSpec = new ModelSpec(
+            "Premium Boss", 2.85f,
+            new[] { "Meshy/PremiumBoss/PremiumBoss_Optimized" },
+            new[]
+            {
+                "Assets/ExternalAssets/Meshy/PremiumBossOptimized/PremiumBoss_Optimized.prefab",
+                "Assets/ExternalAssets/Meshy/PremiumBossOptimized/PremiumBoss_Optimized.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumBossOptimized/model.fbx",
+                "Assets/ExternalAssets/Meshy/PremiumBoss/PremiumBoss_Optimized.fbx"
+            });
 
         private static readonly string[] RunStates = { "RUN_FORWARD", "Running", "CHARGE" };
         private static readonly string[] HitStates = { "HIT_RECOIL", "BeHit" };
         private static readonly string[] DeathStates = { "DEATH", "Dead", "DEATH_FALL_BACK" };
 
-        private static GameObject registeredBomberPrefab;
+        private static readonly Dictionary<EnemyKind, GameObject> RegisteredPrefabs = new();
         private static int activeExternalInstances;
 
         private Animator animator;
@@ -39,15 +77,28 @@ namespace BlossomBreach
         /// <summary>Allows a bootstrap or scene author to provide a prefab without Resources.</summary>
         public static void RegisterBomberPrefab(GameObject prefab)
         {
-            registeredBomberPrefab = prefab;
+            RegisterPrefab(EnemyKind.Bomber, prefab);
+        }
+
+        public static void RegisterPrefab(EnemyKind kind, GameObject prefab)
+        {
+            if (prefab == null) RegisteredPrefabs.Remove(kind);
+            else RegisteredPrefabs[kind] = prefab;
         }
 
         public static bool TryAttachBomber(GameObject enemyRoot, Transform visualRig)
         {
+            return TryAttach(enemyRoot, visualRig, EnemyKind.Bomber);
+        }
+
+        public static bool TryAttach(GameObject enemyRoot, Transform visualRig, EnemyKind kind)
+        {
             if (enemyRoot == null || visualRig == null || activeExternalInstances >= MaxExternalInstances)
                 return false;
+            if (enemyRoot.GetComponent<OptionalEnemyModelAdapter>() != null || !TryGetSpec(kind, out var spec))
+                return false;
 
-            var prefab = ResolveBomberPrefab();
+            var prefab = ResolvePrefab(kind, spec);
             if (prefab == null) return false;
 
             GameObject model;
@@ -57,14 +108,14 @@ namespace BlossomBreach
             }
             catch (System.Exception exception)
             {
-                Debug.LogWarning($"Optional Acorn Bomber could not be instantiated; using procedural fallback. {exception.Message}",
+                Debug.LogWarning($"Optional {spec.Label} could not be instantiated; using procedural fallback. {exception.Message}",
                     enemyRoot);
                 return false;
             }
 
-            model.name = "Optional Meshy Model";
+            model.name = $"{ExternalModelName} ({kind})";
             var modelRenderers = model.GetComponentsInChildren<Renderer>(true);
-            if (modelRenderers.Length == 0 || !WithinRuntimeBudget(modelRenderers))
+            if (modelRenderers.Length == 0 || !WithinRuntimeBudget(modelRenderers, spec.Label))
             {
                 SafeDestroy(model);
                 return false;
@@ -72,8 +123,8 @@ namespace BlossomBreach
 
             DisableImportedColliders(model);
             ConfigureRenderers(modelRenderers);
-            NormalizeModel(model.transform, visualRig, modelRenderers);
-            HideProceduralBomberBody(visualRig, model.transform);
+            NormalizeModel(model.transform, visualRig, modelRenderers, spec.TargetHeight);
+            HideProceduralBody(visualRig, model.transform, kind);
 
             var adapter = enemyRoot.AddComponent<OptionalEnemyModelAdapter>();
             adapter.animator = model.GetComponentInChildren<Animator>(true);
@@ -87,7 +138,7 @@ namespace BlossomBreach
         {
             while (candidate != null)
             {
-                if (candidate.name == "Optional Meshy Model") return true;
+                if (candidate.name.StartsWith(ExternalModelName)) return true;
                 candidate = candidate.parent;
             }
             return false;
@@ -152,35 +203,38 @@ namespace BlossomBreach
             return false;
         }
 
-        private static GameObject ResolveBomberPrefab()
+        private static bool TryGetSpec(EnemyKind kind, out ModelSpec spec)
         {
-            if (registeredBomberPrefab != null) return registeredBomberPrefab;
-            for (var i = 0; i < ResourceCandidates.Length; i++)
+            switch (kind)
             {
-                var candidate = Resources.Load<GameObject>(ResourceCandidates[i]);
+                case EnemyKind.Scout: spec = ScoutSpec; return true;
+                case EnemyKind.Armored: spec = ArmoredSpec; return true;
+                case EnemyKind.Bomber: spec = BomberSpec; return true;
+                case EnemyKind.Boss: spec = BossSpec; return true;
+                default: spec = default; return false;
+            }
+        }
+
+        private static GameObject ResolvePrefab(EnemyKind kind, ModelSpec spec)
+        {
+            if (RegisteredPrefabs.TryGetValue(kind, out var registered) && registered != null) return registered;
+            for (var i = 0; i < spec.ResourceCandidates.Length; i++)
+            {
+                var candidate = Resources.Load<GameObject>(spec.ResourceCandidates[i]);
                 if (candidate != null) return candidate;
             }
 
 #if UNITY_EDITOR
-            var editorCandidates = new[]
+            for (var i = 0; i < spec.EditorCandidates.Length; i++)
             {
-                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/AcornBomber_Optimized.prefab",
-                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/AcornBomber_Optimized.fbx",
-                "Assets/ExternalAssets/Meshy/AcornBomberOptimized/model.fbx",
-                "Assets/ExternalAssets/Meshy/AcornBomber/AcornBomber_Optimized.prefab",
-                "Assets/ExternalAssets/Meshy/AcornBomber/AcornBomber_Optimized.fbx",
-                "Assets/ExternalAssets/Meshy/AcornBomber/AcornBomber.fbx"
-            };
-            for (var i = 0; i < editorCandidates.Length; i++)
-            {
-                var candidate = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(editorCandidates[i]);
+                var candidate = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(spec.EditorCandidates[i]);
                 if (candidate != null) return candidate;
             }
 #endif
             return null;
         }
 
-        private static bool WithinRuntimeBudget(Renderer[] renderers)
+        private static bool WithinRuntimeBudget(Renderer[] renderers, string label)
         {
             var triangles = 0;
             var materials = new HashSet<Material>();
@@ -203,7 +257,7 @@ namespace BlossomBreach
             }
 
             if (triangles <= MaxTrianglesPerInstance && materials.Count <= MaxSharedMaterials) return true;
-            Debug.LogWarning($"Optional Acorn Bomber exceeds mobile budget ({triangles} triangles, " +
+            Debug.LogWarning($"Optional {label} exceeds mobile budget ({triangles} triangles, " +
                              $"{materials.Count} materials); using procedural fallback.");
             return false;
         }
@@ -222,18 +276,18 @@ namespace BlossomBreach
             }
         }
 
-        private static void NormalizeModel(Transform model, Transform rig, Renderer[] renderers)
+        private static void NormalizeModel(Transform model, Transform rig, Renderer[] renderers, float targetHeight)
         {
             model.localPosition = Vector3.zero;
             model.localRotation = Quaternion.Euler(0f, 180f, 0f);
             model.localScale = Vector3.one;
             if (!TryGetBounds(renderers, out var bounds) || bounds.size.y < 0.001f) return;
 
-            var uniformScale = Mathf.Clamp(TargetModelHeight / bounds.size.y, 0.01f, 25f);
+            var uniformScale = Mathf.Clamp(targetHeight / bounds.size.y, 0.01f, 25f);
             model.localScale = Vector3.one * uniformScale;
             if (!TryGetBounds(renderers, out bounds)) return;
             var center = rig.InverseTransformPoint(bounds.center);
-            model.localPosition += new Vector3(-center.x, TargetModelHeight * 0.5f - center.y, -center.z);
+            model.localPosition += new Vector3(-center.x, targetHeight * 0.5f - center.y, -center.z);
         }
 
         private static bool TryGetBounds(Renderer[] renderers, out Bounds bounds)
@@ -253,16 +307,27 @@ namespace BlossomBreach
             return found;
         }
 
-        private static void HideProceduralBomberBody(Transform rig, Transform externalModel)
+        private static void HideProceduralBody(Transform rig, Transform externalModel, EnemyKind kind)
         {
             var renderers = rig.GetComponentsInChildren<Renderer>(true);
             for (var i = 0; i < renderers.Length; i++)
             {
                 if (renderers[i].transform.IsChildOf(externalModel)) continue;
                 var name = renderers[i].gameObject.name;
-                var keepAsTarget = name == "Weak Point Core" || name == "Core Petal" || name == "Fuse Spark";
+                var keepAsTarget = KeepProceduralRenderer(kind, name);
                 renderers[i].enabled = keepAsTarget;
             }
+        }
+
+        private static bool KeepProceduralRenderer(EnemyKind kind, string name)
+        {
+            if (name == "Weak Point Core" || name == "Core Petal") return true;
+            if (kind == EnemyKind.Armored)
+                return name == "Rose Shield Zone" || name == "Rose Petal" || name == "Rose Heart";
+            if (kind == EnemyKind.Bomber)
+                return name == "Pollen Bomb" || name == "Bomb Band" || name == "Fuse" ||
+                       name == "Fuse Spark" || name == "Warning Belt" || name == "Warning Stripe";
+            return false;
         }
 
         private static void DisableImportedColliders(GameObject model)
@@ -276,6 +341,23 @@ namespace BlossomBreach
             if (target == null) return;
             if (Application.isPlaying) Destroy(target);
             else DestroyImmediate(target);
+        }
+
+        private readonly struct ModelSpec
+        {
+            public ModelSpec(string label, float targetHeight, string[] resourceCandidates,
+                string[] editorCandidates)
+            {
+                Label = label;
+                TargetHeight = targetHeight;
+                ResourceCandidates = resourceCandidates;
+                EditorCandidates = editorCandidates;
+            }
+
+            public string Label { get; }
+            public float TargetHeight { get; }
+            public string[] ResourceCandidates { get; }
+            public string[] EditorCandidates { get; }
         }
     }
 }

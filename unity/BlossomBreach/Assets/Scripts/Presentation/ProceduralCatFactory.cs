@@ -76,8 +76,7 @@ namespace BlossomBreach
             capsule.center = new Vector3(0f, 1.03f, 0f);
             capsule.radius = kind == EnemyKind.Boss ? 0.66f : 0.53f;
             capsule.height = kind == EnemyKind.Boss ? 2.25f : 1.9f;
-            if (kind == EnemyKind.Bomber)
-                OptionalEnemyModelAdapter.TryAttachBomber(root, rig);
+            OptionalEnemyModelAdapter.TryAttach(root, rig, kind);
             root.AddComponent<ProceduralCatMotion>().Configure(rig, kind);
             return root;
         }

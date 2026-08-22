@@ -116,6 +116,37 @@ namespace BlossomBreach
             return comboAfterHit >= HitsForOverdrive;
         }
 
+        public static float ApproachProgress(float worldZ, float spawnZ, float breachZ)
+        {
+            float approachLength = spawnZ - breachZ;
+            if (Mathf.Abs(approachLength) < 0.001f)
+            {
+                return 1f;
+            }
+
+            return Mathf.Clamp01((spawnZ - worldZ) / approachLength);
+        }
+
+        public static float ApproachViewportY(
+            float worldZ,
+            float spawnZ,
+            float breachZ,
+            float farViewportY,
+            float nearViewportY)
+        {
+            return Mathf.Lerp(
+                farViewportY,
+                nearViewportY,
+                ApproachProgress(worldZ, spawnZ, breachZ));
+        }
+
+        public static float ConvergedLaneX(float laneCenter, float sway, float approachProgress)
+        {
+            // Outer lanes remain distinct, but close 28% toward the reticle as they charge.
+            float convergence = Mathf.Lerp(1f, 0.72f, Mathf.Clamp01(approachProgress));
+            return laneCenter * convergence + sway;
+        }
+
         public static int ValueAfterPenalty(int currentValue, int penalty)
         {
             return Mathf.Max(0, currentValue - Mathf.Max(0, penalty));

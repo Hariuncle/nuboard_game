@@ -22,6 +22,8 @@ namespace BlossomBreach
         private float _speed;
         private float _laneCenter;
         private float _swayPhase;
+        private float _farViewportY;
+        private float _nearViewportY;
         private float _aliveTime;
         private float _defeatedTime;
         private float _staggerRemaining;
@@ -40,11 +42,24 @@ namespace BlossomBreach
 
         public void Configure(BlossomGame game, EnemyKind kind, float speed, float swayPhase)
         {
+            Configure(game, kind, speed, swayPhase, 0.83f, 0.485f);
+        }
+
+        public void Configure(
+            BlossomGame game,
+            EnemyKind kind,
+            float speed,
+            float swayPhase,
+            float farViewportY,
+            float nearViewportY)
+        {
             _game = game;
             Kind = kind;
             _speed = Mathf.Max(0.1f, speed);
             _laneCenter = transform.position.x;
             _swayPhase = swayPhase;
+            _farViewportY = Mathf.Clamp01(farViewportY);
+            _nearViewportY = Mathf.Clamp01(nearViewportY);
             _aliveTime = 0f;
             _defeatedTime = 0f;
             _staggerRemaining = 0f;
@@ -206,7 +221,6 @@ namespace BlossomBreach
             UpdateBossCoreState();
 
             Vector3 position = transform.position;
-            position.x = _laneCenter + Mathf.Sin(_aliveTime * laneSwayFrequency + _swayPhase) * laneSway;
             if (_staggerRemaining > 0f)
             {
                 _staggerRemaining = Mathf.Max(0f, _staggerRemaining - Time.deltaTime);
@@ -214,6 +228,26 @@ namespace BlossomBreach
             else
             {
                 position.z -= _speed * Time.deltaTime;
+            }
+
+            float approachProgress = _game != null
+                ? GameRules.ApproachProgress(position.z, _game.SpawnZ, _game.BreachZ)
+                : 0f;
+            float sway = Mathf.Sin(_aliveTime * laneSwayFrequency + _swayPhase) * laneSway;
+            position.x = GameRules.ConvergedLaneX(_laneCenter, sway, approachProgress);
+            if (_game != null)
+            {
+                float viewportY = GameRules.ApproachViewportY(
+                    position.z,
+                    _game.SpawnZ,
+                    _game.BreachZ,
+                    _farViewportY,
+                    _nearViewportY);
+                position.y = _game.WorldHeightForViewportY(
+                    position.x,
+                    position.z,
+                    viewportY,
+                    position.y);
             }
             transform.position = position;
 
