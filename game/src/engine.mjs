@@ -2,6 +2,7 @@ const COMBO_WINDOW_SECONDS = 1.2;
 const MAX_COMBO = 8;
 const MISS_SIGNAL_COST = 10;
 const BOSS_SPAWN_SECONDS = 40;
+const WAVE_TWO_SECONDS = 20;
 
 const DRONE_TYPES = {
   normal: { hp: 1, radius: 0.055, score: 100 },
@@ -24,6 +25,9 @@ export function createGameState(overrides = {}) {
     lastHitAt: null,
     nextDroneId: 1,
     bossSpawned: false,
+    chapter: 1,
+    nextShotSeq: 1,
+    lastShot: null,
     endReason: null,
     ...overrides,
     drones: [...(overrides.drones ?? [])],
@@ -55,6 +59,8 @@ export function spawnDrone(state, options = {}) {
     hp: options.hp ?? type.hp,
     maxHp: options.maxHp ?? options.hp ?? type.hp,
     score: options.score ?? type.score,
+    spawnedAt: state.elapsed,
+    baseX: options.x ?? defaultX,
   };
 
   return {
@@ -79,6 +85,13 @@ export function fireAt(state, x, y, now = state.elapsed, viewport = { width: 1, 
       signal,
       phase: signal === 0 ? 'defeat' : state.phase,
       endReason: signal === 0 ? 'signal' : state.endReason,
+      nextShotSeq: state.nextShotSeq + 1,
+      lastShot: {
+        seq: state.nextShotSeq,
+        hit: false,
+        destroyed: false,
+        target: null,
+      },
     };
   }
 
@@ -87,7 +100,7 @@ export function fireAt(state, x, y, now = state.elapsed, viewport = { width: 1, 
       ? Math.min(MAX_COMBO, state.combo + 1)
       : 1;
   const target = state.drones[targetIndex];
-  const damaged = { ...target, hp: target.hp - 1 };
+  const damaged = { ...target, hp: target.hp - 1, hitAt: now, stunUntil: now + 0.16 };
   const destroyed = damaged.hp <= 0;
   const drones = [...state.drones];
 
@@ -105,6 +118,15 @@ export function fireAt(state, x, y, now = state.elapsed, viewport = { width: 1, 
     score: state.score + (destroyed ? target.score * combo : 0),
     phase: destroyed && target.kind === 'boss' ? 'victory' : state.phase,
     endReason: destroyed && target.kind === 'boss' ? 'boss' : state.endReason,
+    nextShotSeq: state.nextShotSeq + 1,
+    lastShot: {
+      seq: state.nextShotSeq,
+      hit: true,
+      destroyed,
+      target: { ...target },
+      hpBefore: target.hp,
+      hpAfter: damaged.hp,
+    },
   };
 }
 
@@ -114,6 +136,7 @@ export function tickGame(state, deltaSeconds) {
   const delta = Math.max(0, Number.isFinite(deltaSeconds) ? deltaSeconds : 0);
   const elapsed = state.elapsed + delta;
   const timeLeft = Math.max(0, state.timeLeft - delta);
+  const chapter = elapsed >= BOSS_SPAWN_SECONDS ? 3 : elapsed >= WAVE_TWO_SECONDS ? 2 : 1;
   const comboExpired =
     state.lastHitAt !== null && elapsed - state.lastHitAt > COMBO_WINDOW_SECONDS;
   const drones = state.drones.map((drone) => moveDrone(drone, elapsed, delta));
@@ -122,6 +145,7 @@ export function tickGame(state, deltaSeconds) {
     ...state,
     elapsed,
     timeLeft,
+    chapter,
     drones,
     combo: comboExpired ? 0 : state.combo,
     lastHitAt: comboExpired ? null : state.lastHitAt,
@@ -165,6 +189,16 @@ function positiveDimension(value) {
 }
 
 function moveDrone(drone, elapsed, delta) {
+  if (elapsed < (drone.stunUntil ?? -Infinity)) return drone;
+  if (drone.kind === 'boss') {
+    const lostHealth = Math.max(0, (drone.maxHp ?? 8) - drone.hp);
+    const amplitude = drone.curve + lostHealth * 0.012;
+    return {
+      ...drone,
+      x: Math.max(0.18, Math.min(0.82, drone.baseX + Math.sin(elapsed * (1.2 + lostHealth * 0.12)) * amplitude)),
+      y: 0.22 + Math.sin(elapsed * 1.7) * 0.035,
+    };
+  }
   return {
     ...drone,
     x: drone.x + drone.vx * delta,

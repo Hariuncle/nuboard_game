@@ -151,7 +151,11 @@ test('an armored drone takes two hits and awards 250 points only when destroyed'
   assert.equal(damaged.drones[0].hp, 1);
   assert.equal(damaged.score, 0);
   assert.equal(damaged.hits, 1);
+  assert.equal(damaged.lastShot.destroyed, false);
+  assert.ok(damaged.drones[0].stunUntil > 0.1);
   assert.equal(destroyed.drones.length, 0);
+  assert.equal(destroyed.lastShot.destroyed, true);
+  assert.equal(destroyed.lastShot.target.kind, 'armored');
   assert.equal(destroyed.score, 500);
   assert.equal(destroyed.combo, 2);
 });
@@ -192,6 +196,12 @@ test('tickGame moves drones and automatically spawns the boss at forty elapsed s
   assert.equal(boss.hp, 8);
   assert.equal(next.bossSpawned, true);
   assert.equal(next.timeLeft, 20);
+  assert.equal(next.chapter, 3);
+});
+
+test('story enters the armored second chapter at twenty seconds', () => {
+  const next = tickGame(createGameState({ elapsed: 19, timeLeft: 41 }), 1);
+  assert.equal(next.chapter, 2);
 });
 
 test('destroying the boss wins the round', () => {

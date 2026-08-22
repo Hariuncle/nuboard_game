@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $images = 1..3 | ForEach-Object { Join-Path $Root ("game\assets\images\meadow-intro-0$_.png") }
-$output = Join-Path $Root "game\assets\video\h3-meadow-intro.mp4"
+$output = Join-Path $Root "game\assets\video\meadow-animatic-preview.mp4"
 $outputDirectory = Split-Path -Parent $output
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("blossom-intro-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tempDirectory | Out-Null
@@ -32,7 +32,7 @@ try {
   & $Ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i $concatList -c copy $videoOnly
   if ($LASTEXITCODE -ne 0) { throw "Video concatenation failed" }
 
-  $staged = Join-Path $outputDirectory (".h3-meadow-intro-" + [guid]::NewGuid() + ".mp4")
+  $staged = Join-Path $outputDirectory (".meadow-animatic-preview-" + [guid]::NewGuid() + ".mp4")
   $audioFilter = "[1:a]volume=0.035,lowpass=f=850[amb];" +
     "[2:a]volume=0.16,afade=t=out:st=0.18:d=0.32,adelay=650|650[hit1];" +
     "[3:a]volume=0.12,afade=t=out:st=0.20:d=0.35,adelay=3380|3380[hit2];" +

@@ -1,6 +1,6 @@
 import { createGameState, spawnDrone, fireAt, tickGame } from "./engine.mjs";
 import { normalizeControllerEvent } from "./controller.mjs";
-import { createSfx } from "./sfx.mjs";
+import { createGameAudio } from "./audio.mjs";
 import { advanceImpactEffects, createImpactEffect } from "./effects.mjs";
 import {
   advanceTouchGesture,
@@ -19,7 +19,7 @@ const screens = {
 const canvas = $("#game-canvas");
 const context = canvas.getContext("2d", { alpha: true });
 const video = $("#intro-video");
-const sfx = createSfx();
+const audio = createGameAudio();
 const spriteSheets = Object.fromEntries(
   Object.entries({
     raiders: "./assets/images/raiders-sheet.png",
@@ -53,6 +53,8 @@ const ui = {
   bossHud: $("#boss-hud"),
   bossFill: $("#boss-fill"),
   callout: $("#game-callout"),
+  chapterLabel: $("#chapter-label"),
+  chapterCopy: $("#chapter-copy"),
   results: $("#result-overlay"),
   resultKicker: $("#result-kicker"),
   resultTitle: $("#result-title"),
@@ -69,6 +71,10 @@ let previousTime = 0;
 let spawnClock = 0;
 let calloutTimer = 0;
 let impactEffects = [];
+let defeatedActors = [];
+let lastChapter = 1;
+let lastBossHp = null;
+let endingClock = 0;
 let hitFlashTimer = 0;
 let lastControllerFireAt = -Infinity;
 const crosshair = { x: 0.5, y: 0.5, recoil: 0 };
@@ -100,7 +106,7 @@ function showScreen(name) {
 }
 
 function beginCutscene() {
-  void sfx.unlock();
+  void audio.unlock();
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || video.error) {
     startGame();
     return;
@@ -117,7 +123,8 @@ function beginCutscene() {
 }
 
 function startGame() {
-  void sfx.unlock();
+  void audio.unlock();
+  audio.setMusic("meadow");
   if (!video.paused) video.pause();
   showScreen("game");
   screens.game.inert = false;
@@ -128,6 +135,10 @@ function startGame() {
   crosshair.x = 0.5;
   crosshair.y = 0.5;
   impactEffects = [];
+  defeatedActors = [];
+  lastChapter = 1;
+  lastBossHp = null;
+  endingClock = 0;
   lastControllerFireAt = -Infinity;
   resizeCanvas();
   announce("LINK START");
@@ -142,7 +153,8 @@ function finishGame() {
   document.exitPointerLock?.();
   screens.game.inert = true;
   const won = state?.phase === "victory";
-  sfx.play(won ? "victory" : "defeat");
+  audio.setMusic(won ? "victory" : "defeat", { loop: false });
+  if (won) audio.play("bossDefeat");
   ui.resultKicker.textContent = won ? "MEADOW RESTORED" : "WARD EXPIRED";
   ui.resultTitle.textContent = won ? "BLOSSOM SAVED" : "TRY AGAIN";
   ui.resultCopy.textContent = won
@@ -172,9 +184,19 @@ function frame(now) {
   const bossWasSpawned = Boolean(state.bossSpawned);
   state = nextState(tickGame(state, elapsed));
   impactEffects = advanceImpactEffects(impactEffects, elapsed);
-  if (!bossWasSpawned && state.bossSpawned) sfx.play("boss");
-  if (spawnClock <= 0) {
-    state = nextState(spawnDrone(state));
+  defeatedActors = defeatedActors
+    .map((actor) => ({ ...actor, defeatAge: actor.defeatAge + elapsed }))
+    .filter((actor) => actor.defeatAge < 0.9);
+  if (state.chapter !== lastChapter) enterChapter(state.chapter);
+  if (!bossWasSpawned && state.bossSpawned) {
+    audio.play("boss");
+    audio.setMusic("boss");
+    announce("FINAL CHAPTER // THORN WARDEN");
+  }
+  if (spawnClock <= 0 && !state.bossSpawned) {
+    const kind = state.chapter >= 2 && state.nextDroneId % 3 === 0 ? "armored" : "normal";
+    state = nextState(spawnDrone(state, { kind }));
+    audio.play("spawn");
     const remaining = numberFrom(state, ["timeRemaining", "timeLeft", "remaining"], 60);
     spawnClock = Math.max(0.45, 1.15 - (60 - remaining) * 0.008);
   }
@@ -184,7 +206,8 @@ function frame(now) {
   crosshair.recoil = Math.max(0, crosshair.recoil - elapsed * 6);
   calloutTimer = Math.max(0, calloutTimer - elapsed);
 
-  if (isRunFinished()) {
+  if (isRunFinished()) endingClock += elapsed;
+  if (isRunFinished() && endingClock >= (state.phase === "victory" ? 0.85 : 0)) {
     finishGame();
     return;
   }
@@ -231,8 +254,10 @@ function render() {
     const point = toScreenPoint(entity, width, height);
     const isBoss = entity.kind === "boss";
     const radius = numberFrom(entity, ["radius"], isBoss ? .12 : .055) * Math.min(width, height);
-    drawDrone(point.x, point.y, radius, entity, isBoss);
+    const hitAge = Math.max(0, state.elapsed - numberFrom(entity, ["hitAt"], -99));
+    drawDrone(point.x, point.y, radius, entity, isBoss, { hitAge });
   }
+  for (const actor of defeatedActors) drawDefeatedActor(actor, width, height);
   for (const effect of impactEffects) drawImpactEffect(effect, width, height);
   const reticle = toScreenPoint(crosshair, width, height);
   drawCrosshair(reticle.x, reticle.y);
@@ -289,9 +314,33 @@ function drawImpactEffect(effect, width, height) {
   context.restore();
 }
 
-function drawDrone(x, y, radius, drone, isBoss) {
+function drawDefeatedActor(actor, width, height) {
+  const point = toScreenPoint(actor, width, height);
+  const progress = Math.min(1, actor.defeatAge / 0.85);
+  const direction = actor.id % 2 ? -1 : 1;
+  const radius = numberFrom(actor, ["radius"], .055) * Math.min(width, height);
+  drawDrone(
+    point.x + direction * progress * radius * .8,
+    point.y + progress * progress * height * .13,
+    radius,
+    actor,
+    actor.kind === "boss",
+    { fallProgress: progress, fallDirection: direction },
+  );
+}
+
+function drawDrone(x, y, radius, drone, isBoss, animation = {}) {
   context.save();
   context.translate(x, y);
+  if (animation.fallProgress) {
+    context.rotate(animation.fallDirection * animation.fallProgress * 1.35);
+    context.scale(1 - animation.fallProgress * .22, 1 - animation.fallProgress * .38);
+    context.globalAlpha = 1 - animation.fallProgress;
+  } else if (animation.hitAge < .16) {
+    const recoil = 1 - animation.hitAge / .16;
+    context.rotate(Math.sin(animation.hitAge * 150) * .12 * recoil);
+    context.scale(1 + recoil * .08, 1 - recoil * .12);
+  }
   const rawId = String(drone.id ?? drone.spawnedAt ?? `${x}:${y}`);
   const hash = [...rawId].reduce((total, character) => total + character.charCodeAt(0), 0);
   const sprite = meadowSprites[isBoss ? 0 : hash % meadowSprites.length];
@@ -365,8 +414,9 @@ function drawCrosshair(x, y) {
 
 function shoot() {
   if (mode !== "game" || !state) return;
-  sfx.play("shot");
+  audio.play("shot");
   const previousHits = state.hits;
+  const previousBoss = entities().find((entity) => entity.kind === "boss");
   const result = fireAt(state, crosshair.x, crosshair.y, state.elapsed, {
     width: canvas.clientWidth,
     height: canvas.clientHeight,
@@ -377,8 +427,24 @@ function shoot() {
   impactEffects.push(createImpactEffect({ x: crosshair.x, y: crosshair.y, hit: didHit }));
   if (impactEffects.length > 8) impactEffects.splice(0, impactEffects.length - 8);
   if (didHit) {
-    sfx.play("hit");
-    announce("CLEANSE HIT");
+    const shot = state.lastShot;
+    audio.play(shot?.hpBefore > 1 ? "hitPower" : "hit");
+    if (shot?.destroyed && shot.target) {
+      defeatedActors.push({ ...shot.target, defeatAge: 0 });
+      if (defeatedActors.length > 10) defeatedActors.splice(0, defeatedActors.length - 10);
+      audio.play("fall");
+      window.setTimeout(() => audio.play("exit"), 420);
+      announce(shot.target.kind === "boss" ? "THORN WARDEN CLEANSED" : "FRIEND AWAKENED");
+    } else {
+      announce("CLEANSE HIT");
+    }
+    if (state.combo > 1 && state.combo % 3 === 0) audio.play("combo");
+    const boss = entities().find((entity) => entity.kind === "boss");
+    if (previousBoss && boss && previousBoss.hp > 4 && boss.hp <= 4) {
+      audio.play("bossPhase");
+      announce("꽃심장이 보여요 — 계속 정화하세요!");
+    }
+    lastBossHp = boss?.hp ?? lastBossHp;
     screens.game.classList.remove("impact-flash");
     void screens.game.offsetWidth;
     screens.game.classList.add("impact-flash");
@@ -386,7 +452,20 @@ function shoot() {
     hitFlashTimer = window.setTimeout(() => screens.game.classList.remove("impact-flash"), 180);
     navigator.vibrate?.(22);
   } else {
-    sfx.play("miss");
+    audio.play("miss");
+  }
+}
+
+function enterChapter(chapter) {
+  lastChapter = chapter;
+  if (chapter === 2) {
+    ui.chapterLabel.textContent = "CHAPTER 2 // BLOOM GATE";
+    ui.chapterCopy.textContent = "가시 갑옷은 두 번 정화하세요";
+    audio.setMusic("wave");
+    announce("CHAPTER 2 // ARMORED FRIENDS");
+  } else if (chapter === 3) {
+    ui.chapterLabel.textContent = "FINAL CHAPTER // HEART GARDEN";
+    ui.chapterCopy.textContent = "가시 군주에게서 꽃심장을 구하세요";
   }
 }
 
@@ -458,7 +537,7 @@ $("#brief-button").addEventListener("click", () => briefDialog.showModal());
 
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
-  void sfx.unlock();
+  void audio.unlock();
   if (event.pointerType === "touch") {
     const result = advanceTouchGesture(touchAim, {
       type: "start",

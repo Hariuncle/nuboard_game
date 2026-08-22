@@ -9,8 +9,8 @@
       content="블루투스 블래스터로 악몽 포자를 정화하는 꽃의 왕국 슈팅 게임, BLOSSOM BREACH"
     />
     <title>BLOSSOM BREACH</title>
-    <link rel="stylesheet" href="./styles.css?v=3" />
-    <script type="module" src="./src/game.mjs?v=5"></script>
+    <link rel="stylesheet" href="./styles.css?v=4" />
+    <script type="module" src="./src/game.mjs?v=6"></script>
   </head>
   <body>
     <main class="app-shell" id="app">
@@ -68,7 +68,7 @@
         <video
           id="intro-video"
           class="intro-video"
-          src="./assets/video/h3-meadow-intro.mp4?v=1"
+          src="./assets/video/meadow-animatic-preview.mp4?v=preview-1"
           poster="./assets/images/meadow-intro-01.png"
           playsinline
           preload="metadata"
@@ -108,7 +108,7 @@
         </div>
         <aside class="rin-comms" aria-label="포모라 안내 상태">
           <img src="./assets/images/pomora-character.png" alt="" />
-          <div><span>GUIDANCE // POMORA</span><strong>BLOOM LINK</strong></div>
+          <div><span id="chapter-label">CHAPTER 1 // CLOVER FIELD</span><strong id="chapter-copy">정찰 포자를 정화하세요</strong></div>
         </aside>
         <canvas id="game-canvas" aria-label="조준하여 악몽 포자를 정화하는 게임 영역"></canvas>
         <p class="game-callout" id="game-callout" aria-live="polite"></p>
