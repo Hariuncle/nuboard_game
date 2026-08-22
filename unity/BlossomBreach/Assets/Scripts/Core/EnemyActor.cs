@@ -234,7 +234,10 @@ namespace BlossomBreach
                 ? GameRules.ApproachProgress(position.z, _game.SpawnZ, _game.BreachZ)
                 : 0f;
             float sway = Mathf.Sin(_aliveTime * laneSwayFrequency + _swayPhase) * laneSway;
-            position.x = GameRules.ConvergedLaneX(_laneCenter, sway, approachProgress);
+            position.x = GameRules.ConvergedLaneX(
+                _laneCenter,
+                sway,
+                GameRules.EaseInFinalQuarter(approachProgress));
             if (_game != null)
             {
                 float viewportY = GameRules.ApproachViewportY(

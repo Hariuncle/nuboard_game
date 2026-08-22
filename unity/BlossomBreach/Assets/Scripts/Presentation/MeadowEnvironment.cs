@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace BlossomBreach
@@ -32,6 +33,10 @@ namespace BlossomBreach
             var generated = new GameObject(GeneratedName).transform;
             generated.SetParent(transform, false);
 
+            var clouds = new List<Transform>(3);
+            var leaves = new List<Transform>(12);
+            var fireflies = new List<Transform>(10);
+
             BuildGround(generated);
             BuildPonds(generated);
             BuildFlowerClusters(generated);
@@ -39,8 +44,12 @@ namespace BlossomBreach
             BuildBoundaryShrubs(generated);
             BuildForegroundDetails(generated);
             BuildTreeLayers(generated);
-            BuildDistantSky(generated);
+            BuildDistantSky(generated, clouds);
+            BuildAmbientAccents(generated, leaves, fireflies);
             ConfigureAtmosphere();
+
+            var ambientMotion = generated.gameObject.AddComponent<MeadowAmbientMotion>();
+            ambientMotion.Configure(clouds.ToArray(), leaves.ToArray(), fireflies.ToArray());
         }
 
         private static void BuildGround(Transform parent)
@@ -54,16 +63,20 @@ namespace BlossomBreach
             ProceduralCatFactory.Part("Far Meadow Tone", PrimitiveType.Cube, parent,
                 new Vector3(0f, -0.042f, 22f), new Vector3(21.8f, 0.016f, 11f),
                 new Color(0.25f, 0.49f, 0.31f));
-            ProceduralCatFactory.Part("Soft Path", PrimitiveType.Cube, parent,
-                new Vector3(0f, -0.045f, 7f), new Vector3(4.5f, 0.025f, 28f),
-                new Color(0.78f, 0.69f, 0.47f));
-
-            for (var i = 0; i < 18; i++)
+            var pathColor = new Color(0.78f, 0.69f, 0.47f);
+            for (var i = 0; i < 14; i++)
             {
-                var z = -5f + i * 1.55f;
-                var x = Mathf.Sin(i * 2.19f) * 1.25f;
+                var z = -5f + i * 2.08f;
+                var x = Mathf.Sin(i * 0.72f) * 1.12f;
+                var nextX = Mathf.Sin((i + 1) * 0.72f) * 1.12f;
+                var yaw = Mathf.Atan2(nextX - x, 2.08f) * Mathf.Rad2Deg;
+                var width = Mathf.Lerp(4.4f, 2.5f, i / 13f);
+                ProceduralCatFactory.Part("Winding Path", PrimitiveType.Cube, parent,
+                    new Vector3(x, -0.041f, z), new Vector3(width, 0.026f, 2.22f), pathColor,
+                    false, Quaternion.Euler(0f, yaw, 0f));
                 ProceduralCatFactory.Part("Path Stone", PrimitiveType.Sphere, parent,
-                    new Vector3(x, 0.005f, z), new Vector3(0.54f, 0.07f, 0.38f),
+                    new Vector3(x + Mathf.Sin(i * 2.19f) * width * 0.28f, 0.005f, z),
+                    new Vector3(0.54f, 0.07f, 0.38f),
                     Color.Lerp(new Color(0.72f, 0.67f, 0.56f), Color.white, i % 3 * 0.05f));
             }
         }
@@ -246,16 +259,24 @@ namespace BlossomBreach
             }
         }
 
-        private static void BuildDistantSky(Transform parent)
+        private static void BuildDistantSky(Transform parent, List<Transform> clouds)
         {
             var upperSky = ProceduralCatFactory.Part("Upper Sky", PrimitiveType.Cube, parent,
-                new Vector3(0f, 19f, 50f), new Vector3(54f, 22f, 0.8f),
-                new Color(0.24f, 0.22f, 0.46f));
+                new Vector3(0f, 23f, 50f), new Vector3(58f, 24f, 0.8f),
+                new Color(0.14f, 0.13f, 0.32f));
+            var middleSky = ProceduralCatFactory.Part("Middle Sky", PrimitiveType.Cube, parent,
+                new Vector3(0f, 12.2f, 49.4f), new Vector3(58f, 9f, 0.85f),
+                new Color(0.29f, 0.29f, 0.53f));
             var lowerSky = ProceduralCatFactory.Part("Lower Sky", PrimitiveType.Cube, parent,
-                new Vector3(0f, 7.2f, 48.8f), new Vector3(54f, 8f, 0.9f),
-                new Color(0.48f, 0.49f, 0.68f));
+                new Vector3(0f, 5.6f, 48.8f), new Vector3(58f, 4.6f, 0.9f),
+                new Color(0.55f, 0.50f, 0.65f));
+            var horizonGlow = ProceduralCatFactory.Part("Horizon Glow", PrimitiveType.Cube, parent,
+                new Vector3(0f, 2.65f, 48.2f), new Vector3(58f, 1.35f, 0.95f),
+                new Color(0.88f, 0.58f, 0.49f), true);
             DisableBackdropShadows(upperSky);
+            DisableBackdropShadows(middleSky);
             DisableBackdropShadows(lowerSky);
+            DisableBackdropShadows(horizonGlow);
 
             var hillColors = new[]
             {
@@ -269,17 +290,46 @@ namespace BlossomBreach
                     new Vector3(8.8f, 4.8f + (i % 2), 3.2f), hillColors[i % hillColors.Length]);
             }
 
-            ProceduralCatFactory.Part("Kindness Sun", PrimitiveType.Sphere, parent,
+            // Thin conifers and a second rolling ridge create readable depth without extra lights.
+            var pineColor = new Color(0.12f, 0.25f, 0.27f);
+            for (var i = 0; i < 11; i++)
+            {
+                var x = -20f + i * 4f;
+                var height = 3.8f + (i % 4) * 0.85f;
+                var pine = ProceduralCatFactory.MeshPart("Distant Pine", ProceduralGeometry.Cone, parent,
+                    new Vector3(x, height * 0.48f, 36f + (i % 3) * 1.2f),
+                    new Vector3(2.2f, height, 2.2f), Quaternion.identity, pineColor);
+                DisableBackdropShadows(pine);
+            }
+
+            var middleRidgeColor = new Color(0.20f, 0.37f, 0.31f);
+            for (var i = 0; i < 7; i++)
+            {
+                var ridge = ProceduralCatFactory.Part("Middle Ridge", PrimitiveType.Sphere, parent,
+                    new Vector3(-15f + i * 5f, 1.05f + (i % 2) * 0.35f, 30f),
+                    new Vector3(5.2f, 2.2f, 2.5f), middleRidgeColor);
+                DisableBackdropShadows(ridge);
+            }
+
+            var sun = ProceduralCatFactory.Part("Kindness Sun", PrimitiveType.Sphere, parent,
                 new Vector3(-10f, 13.2f, 45f), Vector3.one * 3.2f,
                 new Color(1f, 0.68f, 0.31f), true);
+            DisableBackdropShadows(sun);
             var cloud = new Color(0.78f, 0.76f, 0.88f);
-            for (var side = -1; side <= 1; side += 2)
+            for (var bankIndex = 0; bankIndex < 3; bankIndex++)
             {
+                var bank = new GameObject("Cloud Bank").transform;
+                bank.SetParent(parent, false);
+                bank.localPosition = new Vector3(-12f + bankIndex * 11f, 9.8f + bankIndex * 2.2f,
+                    43.5f - bankIndex * 1.3f);
+                clouds.Add(bank);
                 for (var i = 0; i < 4; i++)
                 {
-                    ProceduralCatFactory.Part("Distant Cloud", PrimitiveType.Sphere, parent,
-                        new Vector3(side * (7f + i * 1.25f), 10.4f + (i % 2) * 0.55f, 44f),
-                        new Vector3(2.4f, 0.72f, 0.65f), Color.Lerp(cloud, Color.white, i * 0.05f), true);
+                    var puff = ProceduralCatFactory.Part("Distant Cloud", PrimitiveType.Sphere, bank,
+                        new Vector3(i * 1.35f, (i % 2) * 0.48f, 0f),
+                        new Vector3(2.35f, 0.68f, 0.66f),
+                        Color.Lerp(cloud, Color.white, i * 0.05f), true);
+                    DisableBackdropShadows(puff);
                 }
             }
 
@@ -292,6 +342,49 @@ namespace BlossomBreach
                         new Vector3(side * (10.5f + i * 0.75f), 8.5f + i * 1.45f, 22f + i),
                         new Vector3(3.1f, 2.1f, 2.2f),
                         Color.Lerp(new Color(0.12f, 0.30f, 0.25f), new Color(0.32f, 0.48f, 0.31f), i * 0.10f));
+                }
+            }
+        }
+
+        private static void BuildAmbientAccents(Transform parent, List<Transform> leaves,
+            List<Transform> fireflies)
+        {
+            var leafColor = new Color(0.46f, 0.70f, 0.29f);
+            for (var i = 0; i < 12; i++)
+            {
+                var side = i % 2 == 0 ? -1f : 1f;
+                var leaf = ProceduralCatFactory.MeshPart("Drifting Leaf", ProceduralGeometry.Petal, parent,
+                    new Vector3(side * (5.8f + (i % 4) * 1.1f), 3.0f + (i % 5) * 0.72f,
+                        -1f + i * 2.15f),
+                    new Vector3(0.20f, 0.32f, 0.08f), Quaternion.Euler(18f, i * 37f, side * 24f),
+                    leafColor);
+                DisableBackdropShadows(leaf);
+                leaves.Add(leaf.transform);
+            }
+
+            var fireflyColor = new Color(1f, 0.82f, 0.30f);
+            for (var i = 0; i < 10; i++)
+            {
+                var side = i % 2 == 0 ? -1f : 1f;
+                var firefly = ProceduralCatFactory.Part("Kindness Firefly", PrimitiveType.Sphere, parent,
+                    new Vector3(side * (3.1f + (i % 3) * 1.25f), 0.95f + (i % 4) * 0.42f,
+                        -2.5f + i * 2.7f),
+                    Vector3.one * 0.075f, fireflyColor, true);
+                DisableBackdropShadows(firefly);
+                fireflies.Add(firefly.transform);
+            }
+
+            // Repeated warm points visually pull approaching enemies toward the winding centre path.
+            for (var i = 0; i < 7; i++)
+            {
+                var z = -3f + i * 4.2f;
+                var center = Mathf.Sin((i + 1) * 0.72f) * 1.12f;
+                var halfWidth = Mathf.Lerp(2.55f, 1.55f, i / 6f);
+                for (var side = -1; side <= 1; side += 2)
+                {
+                    ProceduralCatFactory.Part("Path Glow", PrimitiveType.Sphere, parent,
+                        new Vector3(center + side * halfWidth, 0.19f, z), Vector3.one * 0.11f,
+                        fireflyColor, true);
                 }
             }
         }

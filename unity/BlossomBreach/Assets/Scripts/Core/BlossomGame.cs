@@ -50,23 +50,23 @@ namespace BlossomBreach
 
         [Header("Arena")]
         [SerializeField] private float spawnZ = 24f;
-        [SerializeField] private float breachZ = -2.25f;
+        [SerializeField] private float breachZ = -7.5f;
         [SerializeField] private float laneWidth = 2.25f;
         [SerializeField] private float enemyHeight = 0f;
 
         [Header("Screen-space Approach")]
         [SerializeField, Range(0f, 1f)] private float farViewportYMin = 0.78f;
         [SerializeField, Range(0f, 1f)] private float farViewportYMax = 0.88f;
-        [SerializeField, Range(0f, 1f)] private float nearViewportYMin = 0.36f;
-        [SerializeField, Range(0f, 1f)] private float nearViewportYMax = 0.48f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMin = 0.28f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMax = 0.44f;
 
         [Header("Tuning")]
         [SerializeField] private int startingPurity = 100;
-        [SerializeField] private float scoutSpeed = 3.45f;
-        [SerializeField] private float fastSpeed = 5.12f;
-        [SerializeField] private float armoredSpeed = 2.55f;
-        [SerializeField] private float bomberSpeed = 3.05f;
-        [SerializeField] private float bossSpeed = 1.53f;
+        [SerializeField] private float scoutSpeed = 3f;
+        [SerializeField] private float fastSpeed = 3.9f;
+        [SerializeField] private float armoredSpeed = 2.65f;
+        [SerializeField] private float bomberSpeed = 3.35f;
+        [SerializeField] private float bossSpeed = 2.25f;
         [SerializeField] private float rayDistance = 100f;
         [SerializeField] private float comboHoldSeconds = 1.75f;
         [SerializeField] private float comboDecayStepSeconds = 0.55f;
@@ -438,6 +438,12 @@ namespace BlossomBreach
             float nearViewportY = UnityEngine.Random.Range(
                 Mathf.Min(nearViewportYMin, nearViewportYMax),
                 Mathf.Max(nearViewportYMin, nearViewportYMax));
+            if (kind == EnemyKind.Boss)
+            {
+                // The boss is much taller than ordinary cats; keep its crown below the
+                // top edge while its body still fills most of the close-range frame.
+                nearViewportY = Mathf.Min(nearViewportY, 0.34f);
+            }
             float laneX = lane * laneWidth;
             float spawnHeight = WorldHeightForViewportY(laneX, spawnZ, farViewportY, enemyHeight);
             enemyObject.transform.position = new Vector3(laneX, spawnHeight, spawnZ);

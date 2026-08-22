@@ -137,13 +137,29 @@ namespace BlossomBreach
             return Mathf.Lerp(
                 farViewportY,
                 nearViewportY,
-                ApproachProgress(worldZ, spawnZ, breachZ));
+                EaseInFinalQuarter(ApproachProgress(worldZ, spawnZ, breachZ)));
+        }
+
+        public static float EaseInFinalQuarter(float approachProgress)
+        {
+            float progress = Mathf.Clamp01(approachProgress);
+            if (progress <= 0.75f)
+            {
+                return progress;
+            }
+
+            float finalQuarter = (progress - 0.75f) * 4f;
+            // C1-continuous at 75%: briefly settles, then accelerates into the close-up.
+            float eased = finalQuarter -
+                0.6f * finalQuarter * finalQuarter * (1f - finalQuarter);
+            return 0.75f + eased * 0.25f;
         }
 
         public static float ConvergedLaneX(float laneCenter, float sway, float approachProgress)
         {
-            // Outer lanes remain distinct, but close 28% toward the reticle as they charge.
-            float convergence = Mathf.Lerp(1f, 0.72f, Mathf.Clamp01(approachProgress));
+            // At four metres from the camera, stronger convergence keeps large actors
+            // inside the frame. Outer lanes remain on their original side of centre.
+            float convergence = Mathf.Lerp(1f, 0.44f, Mathf.Clamp01(approachProgress));
             return laneCenter * convergence + sway;
         }
 

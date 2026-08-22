@@ -80,12 +80,6 @@ namespace BlossomBreach
             scaler.matchWidthOrHeight = 0.5f;
 
             RawImage screen = CreateFullscreenRawImage(introRoot.transform);
-            RenderTexture target = new RenderTexture(1920, 1080, 0, RenderTextureFormat.ARGB32)
-            {
-                name = "Meadow Intro Render Texture"
-            };
-            target.Create();
-            screen.texture = target;
 
             VideoPlayer player = introRoot.AddComponent<VideoPlayer>();
             player.playOnAwake = false;
@@ -94,8 +88,8 @@ namespace BlossomBreach
             player.isLooping = true;
             player.source = VideoSource.Url;
             player.url = videoPath;
-            player.renderMode = VideoRenderMode.RenderTexture;
-            player.targetTexture = target;
+            player.renderMode = VideoRenderMode.APIOnly;
+            player.sendFrameReadyEvents = true;
             player.audioOutputMode = VideoAudioOutputMode.AudioSource;
             player.controlledAudioTrackCount = 1;
 
@@ -111,7 +105,27 @@ namespace BlossomBreach
                 Debug.LogWarning($"인트로 영상을 재생하지 못했습니다. 게임을 바로 시작합니다: {message}");
             };
 
-            BuildIntroSkipPrompt(introRoot.transform);
+            long frameReadyCount = 0;
+            long lastFrameIndex = -1;
+            bool firstFrameLogged = false;
+            VideoPlayer.FrameReadyEventHandler frameReadyHandler = (source, frameIndex) =>
+            {
+                frameReadyCount++;
+                lastFrameIndex = frameIndex;
+                if (source.texture != null)
+                {
+                    screen.texture = source.texture;
+                }
+
+                if (!firstFrameLogged)
+                {
+                    firstFrameLogged = true;
+                    Debug.Log($"인트로 첫 프레임 수신: {frameIndex}.");
+                }
+            };
+            player.frameReady += frameReadyHandler;
+
+            RectTransform skipTarget = BuildIntroSkipPrompt(introRoot.transform);
             RectTransform menuReticle = BuildMenuReticle(introRoot.transform);
             skipIntro = false;
             introFailed = false;
@@ -140,16 +154,30 @@ namespace BlossomBreach
                 while (!skipIntro && !introFailed)
                 {
                     UpdateMenuReticle(menuReticle);
+                    if (player.frame >= 0 && player.texture != null)
+                    {
+                        screen.texture = player.texture;
+                        if (!firstFrameLogged)
+                        {
+                            firstFrameLogged = true;
+                            lastFrameIndex = player.frame;
+                            Debug.Log($"인트로 첫 프레임 표시: {player.frame} (폴백 경로).");
+                        }
+                    }
+
                     if (Time.realtimeSinceStartup >= skipEnabledAt)
                     {
                         if (!releaseObserved)
                         {
                             releaseObserved = !IsIntroSkipHeld();
                         }
-                        else if (WasIntroSkipPressed())
+                        else if (TryGetIntroSkipPress(out Vector2 pressPosition) &&
+                                 RectTransformUtility.RectangleContainsScreenPoint(skipTarget, pressPosition, null))
                         {
                             skipIntro = true;
-                            Debug.Log("인트로 건너뛰기: 방아쇠를 놓은 뒤 새 입력을 감지했습니다.");
+                            Debug.Log(
+                                $"인트로 건너뛰기: 방아쇠를 놓은 뒤 우측 하단 버튼 입력. " +
+                                $"frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}.");
                         }
                     }
                     yield return null;
@@ -163,10 +191,9 @@ namespace BlossomBreach
 
             player.Stop();
             introAudio.Stop();
-            player.targetTexture = null;
+            player.frameReady -= frameReadyHandler;
             screen.texture = null;
-            target.Release();
-            Destroy(target);
+            Debug.Log($"인트로 종료: frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}.");
             Destroy(introRoot);
         }
 
@@ -317,48 +344,71 @@ namespace BlossomBreach
             return light;
         }
 
-        private void BuildIntroSkipPrompt(Transform parent)
+        private RectTransform BuildIntroSkipPrompt(Transform parent)
         {
             Font font = GetUiFont();
             GameObject buttonObject = new GameObject("인트로 건너뛰기", typeof(RectTransform), typeof(Image), typeof(Button));
             RectTransform rect = buttonObject.GetComponent<RectTransform>();
             rect.SetParent(parent, false);
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
-            rect.pivot = new Vector2(0.5f, 0f);
-            rect.anchoredPosition = new Vector2(0f, 54f);
-            rect.sizeDelta = new Vector2(620f, 104f);
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0f);
+            rect.pivot = new Vector2(1f, 0f);
+            rect.anchoredPosition = new Vector2(-42f, 42f);
+            rect.sizeDelta = new Vector2(520f, 190f);
             Image image = buttonObject.GetComponent<Image>();
             image.color = new Color(0.03f, 0.10f, 0.11f, 0.88f);
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = image;
 
-            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
-            RectTransform labelRect = labelObject.GetComponent<RectTransform>();
-            labelRect.SetParent(rect, false);
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.offsetMin = Vector2.zero;
-            labelRect.offsetMax = Vector2.zero;
-            Text label = labelObject.GetComponent<Text>();
-            label.font = font;
-            label.fontSize = 24;
-            label.fontStyle = FontStyle.Bold;
-            label.alignment = TextAnchor.MiddleCenter;
-            label.color = new Color32(255, 251, 222, 255);
-            label.raycastTarget = false;
-            label.text = "방아쇠를 당기면 인트로 건너뛰기  /  게임 시작";
+            Sprite circle = Resources.GetBuiltinResource<Sprite>("UI/Skin/Knob.psd");
+            Image outerRing = CreateImage("표적 외곽", rect, new Color32(255, 102, 133, 255));
+            outerRing.sprite = circle;
+            outerRing.preserveAspect = true;
+            outerRing.rectTransform.anchorMin = outerRing.rectTransform.anchorMax = new Vector2(0.17f, 0.5f);
+            outerRing.rectTransform.anchoredPosition = Vector2.zero;
+            outerRing.rectTransform.sizeDelta = new Vector2(124f, 124f);
+
+            Image innerRing = CreateImage("표적 내부", outerRing.transform, new Color32(10, 29, 32, 255));
+            innerRing.sprite = circle;
+            innerRing.preserveAspect = true;
+            innerRing.rectTransform.anchorMin = innerRing.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            innerRing.rectTransform.anchoredPosition = Vector2.zero;
+            innerRing.rectTransform.sizeDelta = new Vector2(82f, 82f);
+
+            Image centerDot = CreateImage("표적 중심", innerRing.transform, new Color32(136, 255, 202, 255));
+            centerDot.sprite = circle;
+            centerDot.preserveAspect = true;
+            centerDot.rectTransform.anchorMin = centerDot.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            centerDot.rectTransform.anchoredPosition = Vector2.zero;
+            centerDot.rectTransform.sizeDelta = new Vector2(28f, 28f);
+
+            Text targetLabel = CreateText("표적 안내", rect, font, 29, new Color32(255, 251, 222, 255), FontStyle.Bold);
+            Stretch(targetLabel.rectTransform, new Vector2(0.32f, 0.46f), new Vector2(0.98f, 0.91f));
+            targetLabel.text = "여기를 쏘세요";
+
+            Text actionLabel = CreateText("동작 안내", rect, font, 18, new Color32(136, 255, 202, 255), FontStyle.Bold);
+            Stretch(actionLabel.rectTransform, new Vector2(0.32f, 0.12f), new Vector2(0.98f, 0.50f));
+            actionLabel.text = "인트로 건너뛰기  /  게임 시작";
+            return rect;
         }
 
-        private static bool WasIntroSkipPressed()
+        private static bool TryGetIntroSkipPress(out Vector2 screenPosition)
         {
+            screenPosition = default;
             if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
             {
+                screenPosition = Mouse.current.position.ReadValue();
                 return true;
             }
 
-            return Touchscreen.current != null &&
-                   Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+            if (Touchscreen.current != null &&
+                Touchscreen.current.primaryTouch.press.wasPressedThisFrame)
+            {
+                screenPosition = Touchscreen.current.primaryTouch.position.ReadValue();
+                return true;
+            }
+
+            return false;
         }
 
         private static bool IsIntroSkipHeld()
