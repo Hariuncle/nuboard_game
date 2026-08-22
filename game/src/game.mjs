@@ -2,6 +2,7 @@ import { createGameState, spawnDrone, fireAt, tickGame } from "./engine.mjs";
 import { normalizeControllerEvent } from "./controller.mjs";
 import { createGameAudio } from "./audio.mjs";
 import { advanceImpactEffects, createImpactEffect } from "./effects.mjs";
+import { createScene3D } from "./scene3d.mjs";
 import {
   advanceTouchGesture,
   aimFromClientPoint,
@@ -18,32 +19,17 @@ const screens = {
 
 const canvas = $("#game-canvas");
 const context = canvas.getContext("2d", { alpha: true });
+const webglCanvas = $("#webgl-canvas");
 const video = $("#intro-video");
 const audio = createGameAudio();
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-const spriteSheets = Object.fromEntries(
-  Object.entries({
-    raiders: "./assets/images/raiders-sheet.png",
-    minstrel: "./assets/images/minstrel-sheet.png",
-    support: "./assets/images/support-sheet.png",
-    defenders: "./assets/images/defenders-sheet.png",
-  }).map(([key, src]) => {
-    const image = new Image();
-    image.src = src;
-    return [key, image];
-  }),
-);
-
-const meadowSprites = [
-  { sheet: "raiders", source: [5, 0, 520, 570] },
-  { sheet: "raiders", source: [10, 710, 520, 550] },
-  { sheet: "minstrel", source: [0, 0, 550, 505] },
-  { sheet: "minstrel", source: [15, 825, 520, 370] },
-  { sheet: "support", source: [0, 35, 520, 550] },
-  { sheet: "support", source: [0, 740, 520, 500] },
-  { sheet: "defenders", source: [10, 245, 450, 410] },
-  { sheet: "defenders", source: [10, 955, 440, 370] },
-];
+let scene3d = null;
+try {
+  scene3d = createScene3D(webglCanvas);
+} catch (error) {
+  webglCanvas.hidden = true;
+  console.error("WebGL scene unavailable", error);
+}
 
 const ui = {
   score: $("#score-value"),
@@ -177,6 +163,7 @@ function resizeCanvas() {
   canvas.width = Math.max(1, Math.round(rect.width * ratio));
   canvas.height = Math.max(1, Math.round(rect.height * ratio));
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  scene3d?.resize(rect.width, rect.height, ratio);
 }
 
 function frame(now) {
@@ -254,14 +241,8 @@ function render() {
   const height = canvas.clientHeight;
   context.clearRect(0, 0, width, height);
 
-  for (const entity of entities()) {
-    const point = toScreenPoint(entity, width, height);
-    const isBoss = entity.kind === "boss";
-    const radius = numberFrom(entity, ["radius"], isBoss ? .12 : .055) * Math.min(width, height);
-    const hitAge = Math.max(0, state.elapsed - numberFrom(entity, ["hitAt"], -99));
-    drawDrone(point.x, point.y, radius, entity, isBoss, { hitAge });
-  }
-  for (const actor of defeatedActors) drawDefeatedActor(actor, width, height);
+  scene3d?.sync(entities(), defeatedActors, state.elapsed);
+  scene3d?.render();
   for (const effect of impactEffects) drawImpactEffect(effect, width, height);
   const reticle = toScreenPoint(crosshair, width, height);
   drawCrosshair(reticle.x, reticle.y);
@@ -314,85 +295,6 @@ function drawImpactEffect(effect, width, height) {
     context.moveTo(originX - marker, originY + marker); context.lineTo(originX - 3, originY + 3);
     context.moveTo(originX + marker, originY + marker); context.lineTo(originX + 3, originY + 3);
     context.stroke();
-  }
-  context.restore();
-}
-
-function drawDefeatedActor(actor, width, height) {
-  const point = toScreenPoint(actor, width, height);
-  const progress = Math.min(1, actor.defeatAge / 0.85);
-  const direction = actor.id % 2 ? -1 : 1;
-  const radius = numberFrom(actor, ["radius"], .055) * Math.min(width, height);
-  drawDrone(
-    point.x + direction * progress * radius * .8,
-    point.y + progress * progress * height * .13,
-    radius,
-    actor,
-    actor.kind === "boss",
-    { fallProgress: progress, fallDirection: direction },
-  );
-}
-
-function drawDrone(x, y, radius, drone, isBoss, animation = {}) {
-  context.save();
-  context.translate(x, y);
-  if (animation.fallProgress) {
-    if (!reducedMotion.matches) {
-      context.rotate(animation.fallDirection * animation.fallProgress * 1.35);
-      context.scale(1 - animation.fallProgress * .22, 1 - animation.fallProgress * .38);
-    }
-    context.globalAlpha = 1 - animation.fallProgress;
-  } else if (!reducedMotion.matches && animation.hitAge < .16) {
-    const recoil = 1 - animation.hitAge / .16;
-    context.rotate(Math.sin(animation.hitAge * 150) * .12 * recoil);
-    context.scale(1 + recoil * .08, 1 - recoil * .12);
-  }
-  const rawId = String(drone.id ?? drone.spawnedAt ?? `${x}:${y}`);
-  const hash = [...rawId].reduce((total, character) => total + character.charCodeAt(0), 0);
-  const sprite = meadowSprites[isBoss ? 0 : hash % meadowSprites.length];
-  const image = spriteSheets[sprite.sheet];
-  if (image.complete && image.naturalWidth) {
-    const size = radius * (isBoss ? 2.65 : 2.35);
-    const [sx, sy, sw, sh] = sprite.source;
-    context.shadowColor = isBoss ? "#ff719f" : "#fff2bd";
-    context.shadowBlur = isBoss ? 30 : 15;
-    context.beginPath();
-    context.arc(0, 0, size * .48, 0, Math.PI * 2);
-    context.fillStyle = isBoss ? "rgba(113,36,61,.35)" : "rgba(255,250,225,.2)";
-    context.fill();
-    context.globalCompositeOperation = "multiply";
-    context.drawImage(image, sx, sy, sw, sh, -size / 2, -size / 2, size, size);
-    context.globalCompositeOperation = "source-over";
-  } else {
-    context.rotate(numberFrom(drone, ["rotation"], performance.now() * 0.0005));
-    context.shadowColor = isBoss ? "#ff719f" : "#ffe98a";
-    context.shadowBlur = isBoss ? 28 : 17;
-    context.fillStyle = isBoss ? "rgba(255,63,210,.2)" : "rgba(57,244,255,.15)";
-    context.strokeStyle = isBoss ? "#ff719f" : "#ffe98a";
-    context.lineWidth = isBoss ? 4 : 2;
-    context.beginPath();
-    for (let point = 0; point < 8; point += 1) {
-      const angle = (Math.PI * 2 * point) / 8;
-      const distance = point % 2 ? radius * 0.72 : radius;
-      const px = Math.cos(angle) * distance;
-      const py = Math.sin(angle) * distance;
-      point ? context.lineTo(px, py) : context.moveTo(px, py);
-    }
-    context.closePath();
-    context.fill();
-    context.stroke();
-    context.fillStyle = isBoss ? "#ff719f" : "#fff7d6";
-    context.beginPath();
-    context.arc(0, 0, radius * 0.24, 0, Math.PI * 2);
-    context.fill();
-  }
-  const hp = numberFrom(drone, ["hp", "health"], 1);
-  const maxHp = Math.max(1, numberFrom(drone, ["maxHp", "maxHealth"], hp));
-  if (maxHp > 1 && !isBoss) {
-    context.fillStyle = "rgba(0,0,0,.6)";
-    context.fillRect(-radius, radius + 9, radius * 2, 4);
-    context.fillStyle = "#ff3fd2";
-    context.fillRect(-radius, radius + 9, radius * 2 * (hp / maxHp), 4);
   }
   context.restore();
 }
@@ -630,6 +532,8 @@ document.addEventListener("pointerdown", (event) => {
 window.addEventListener("resize", () => {
   if (mode === "game") resizeCanvas();
 });
+
+window.addEventListener("pagehide", () => scene3d?.dispose(), { once: true });
 
 for (const image of document.querySelectorAll("img")) {
   image.addEventListener("error", () => image.closest(".portrait-frame")?.classList.add("image-failed"));

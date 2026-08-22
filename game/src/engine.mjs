@@ -1,13 +1,16 @@
+import { projectRadius } from './projection.mjs';
+
 const COMBO_WINDOW_SECONDS = 1.2;
 const MAX_COMBO = 8;
 const MISS_SIGNAL_COST = 10;
 const BOSS_SPAWN_SECONDS = 40;
 const WAVE_TWO_SECONDS = 20;
+export const BREACH_DEPTH = 0;
 
 const DRONE_TYPES = {
-  normal: { hp: 1, radius: 0.055, score: 100 },
-  armored: { hp: 2, radius: 0.07, score: 250 },
-  boss: { hp: 8, radius: 0.12, score: 1000 },
+  normal: { hp: 1, radius: 0.055, score: 100, approachSpeed: 0.075, breachDamage: 15 },
+  armored: { hp: 2, radius: 0.07, score: 250, approachSpeed: 0.055, breachDamage: 25 },
+  boss: { hp: 8, radius: 0.12, score: 1000, approachSpeed: 0.02, breachDamage: 60 },
 };
 
 export function createGameState(overrides = {}) {
@@ -41,17 +44,15 @@ export function spawnDrone(state, options = {}) {
   const type = DRONE_TYPES[kind];
   const id = state.nextDroneId;
   const fromRight = id % 2 === 0;
-  const defaultX = kind === 'boss' ? 0.5 : fromRight ? 0.95 : 0.05;
+  const defaultX = kind === 'boss' ? 0.5 : fromRight ? 0.66 : 0.34;
   const defaultY = kind === 'boss' ? 0.2 : 0.18 + ((id * 0.23) % 0.64);
-  const defaultVx = kind === 'boss' ? 0 : fromRight ? -0.12 : 0.12;
+  const laneX = options.laneX ?? options.x ?? defaultX;
 
   const drone = {
     id,
     kind,
-    x: options.x ?? defaultX,
+    x: laneX,
     y: options.y ?? defaultY,
-    vx: options.vx ?? defaultVx,
-    vy: options.vy ?? 0,
     curve: options.curve ?? (kind === 'boss' ? 0.025 : 0.04),
     curveSpeed: options.curveSpeed ?? (kind === 'boss' ? 1.2 : 2 + (id % 3) * 0.35),
     curvePhase: options.curvePhase ?? id * 0.8,
@@ -59,8 +60,12 @@ export function spawnDrone(state, options = {}) {
     hp: options.hp ?? type.hp,
     maxHp: options.maxHp ?? options.hp ?? type.hp,
     score: options.score ?? type.score,
+    depth: options.depth ?? 1,
+    approachSpeed: options.approachSpeed ?? type.approachSpeed,
+    laneX,
+    breachDamage: options.breachDamage ?? type.breachDamage,
     spawnedAt: state.elapsed,
-    baseX: options.x ?? defaultX,
+    baseX: laneX,
   };
 
   return {
@@ -139,9 +144,14 @@ export function tickGame(state, deltaSeconds) {
   const chapter = elapsed >= BOSS_SPAWN_SECONDS ? 3 : elapsed >= WAVE_TWO_SECONDS ? 2 : 1;
   const comboExpired =
     state.lastHitAt !== null && elapsed - state.lastHitAt > COMBO_WINDOW_SECONDS;
-  const drones = state.drones
-    .map((drone) => moveDrone(drone, elapsed, delta))
-    .filter((drone) => drone.kind === 'boss' || isWithinViewport(drone));
+  const movedDrones = state.drones.map((drone) => moveDrone(drone, elapsed, delta));
+  const breachedDrones = movedDrones.filter((drone) => drone.depth <= BREACH_DEPTH);
+  const drones = movedDrones.filter((drone) => drone.depth > BREACH_DEPTH);
+  const breachDamage = breachedDrones.reduce(
+    (total, drone) => total + Math.max(0, finiteOr(drone.breachDamage, 0)),
+    0,
+  );
+  const signal = Math.max(0, state.signal - breachDamage);
 
   let next = {
     ...state,
@@ -149,9 +159,14 @@ export function tickGame(state, deltaSeconds) {
     timeLeft,
     chapter,
     drones,
+    signal,
     combo: comboExpired ? 0 : state.combo,
     lastHitAt: comboExpired ? null : state.lastHitAt,
   };
+
+  if (signal === 0) {
+    return { ...next, phase: 'defeat', endReason: 'signal' };
+  }
 
   if (timeLeft === 0) {
     return { ...next, phase: 'defeat', endReason: 'timeout' };
@@ -177,7 +192,8 @@ function nearestHitIndex(drones, x, y, viewport) {
       (x - drone.x) * width,
       (y - drone.y) * height,
     ) / unit;
-    if (distance <= drone.radius && distance < nearestDistance) {
+    const hitRadius = projectRadius(drone.depth, drone.radius);
+    if (distance <= hitRadius && distance < nearestDistance) {
       match = index;
       nearestDistance = distance;
     }
@@ -190,33 +206,34 @@ function positiveDimension(value) {
   return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
-function isWithinViewport(drone) {
-  const radius = Math.max(0, Number.isFinite(drone.radius) ? drone.radius : 0);
-  return (
-    drone.x + radius >= 0 &&
-    drone.x - radius <= 1 &&
-    drone.y + radius >= 0 &&
-    drone.y - radius <= 1
-  );
-}
-
 function moveDrone(drone, elapsed, delta) {
   if (elapsed < (drone.stunUntil ?? -Infinity)) return drone;
+  const depth = finiteOr(drone.depth, 1) - Math.max(0, finiteOr(drone.approachSpeed, 0)) * delta;
   if (drone.kind === 'boss') {
     const lostHealth = Math.max(0, (drone.maxHp ?? 8) - drone.hp);
     const amplitude = drone.curve + lostHealth * 0.012;
     return {
       ...drone,
-      x: Math.max(0.18, Math.min(0.82, drone.baseX + Math.sin(elapsed * (1.2 + lostHealth * 0.12)) * amplitude)),
-      y: 0.22 + Math.sin(elapsed * 1.7) * 0.035,
+      depth,
+      x: boundedSway(drone.laneX, amplitude, elapsed * (1.2 + lostHealth * 0.12)),
     };
   }
   return {
     ...drone,
-    x: drone.x + drone.vx * delta,
-    y:
-      drone.y +
-      drone.vy * delta +
-      Math.sin(elapsed * drone.curveSpeed + drone.curvePhase) * drone.curve * delta,
+    depth,
+    x: boundedSway(
+      drone.laneX,
+      Math.max(0, finiteOr(drone.curve, 0)),
+      elapsed * drone.curveSpeed + drone.curvePhase,
+    ),
   };
+}
+
+function boundedSway(laneX, amplitude, phase) {
+  const lane = finiteOr(laneX, 0.5);
+  return Math.max(0, Math.min(1, lane + Math.sin(phase) * amplitude));
+}
+
+function finiteOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
 }

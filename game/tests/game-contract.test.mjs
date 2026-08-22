@@ -31,11 +31,11 @@ test("starting a new round cancels every pending enemy exit sound timer", () => 
   assert.ok(cancelTimers < clearTimers);
 });
 
-test("armored HP bars are drawn inside the actor fall transform", () => {
-  const drawDrone = functionBody("drawDrone");
-  const hpBar = drawDrone.indexOf("fillRect(-radius");
-  const restore = drawDrone.indexOf("context.restore()");
+test("defeated actors are synchronized into the 3D fall animation", () => {
+  const render = functionBody("render");
+  const syncActors = render.indexOf("scene3d?.sync(entities(), defeatedActors, state.elapsed)");
+  const renderScene = render.indexOf("scene3d?.render()");
 
-  assert.ok(hpBar >= 0, "HP bar should use actor-local coordinates");
-  assert.ok(hpBar < restore, "HP bar should be drawn before restoring the actor transform");
+  assert.ok(syncActors >= 0, "3D scene should receive defeated actors");
+  assert.ok(syncActors < renderScene, "actor state should be synchronized before rendering");
 });

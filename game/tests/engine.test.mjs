@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  BREACH_DEPTH,
   createGameState,
   fireAt,
   spawnDrone,
@@ -57,57 +58,26 @@ test('spawnDrone appends a normal target without mutating the previous state', (
   );
 });
 
-test('default drones spawn inside opposite edges and move inward', () => {
+test('default drones spawn in fixed lanes and approach along the depth axis', () => {
   const leftSpawn = spawnDrone(createGameState());
   const bothSides = spawnDrone(leftSpawn);
 
-  assert.deepEqual(
-    bothSides.drones.map(({ x, vx }) => ({ x, vx })),
-    [
-      { x: 0.05, vx: 0.12 },
-      { x: 0.95, vx: -0.12 },
-    ],
-  );
+  assert.deepEqual(bothSides.drones.map(({ laneX }) => laneX), [0.34, 0.66]);
+
+  const initial = bothSides.drones[0];
+  const moved = tickGame(bothSides, 1).drones[0];
+  assert.equal(moved.laneX, initial.laneX);
+  assert.ok(Math.abs(moved.x - moved.laneX) <= moved.curve);
+  assert.ok(moved.depth < initial.depth);
 });
 
-test('fixed-world drone motion does not wrap across screen edges', () => {
-  const state = spawnDrone(createGameState(), {
-    x: 0.95,
-    y: 0.5,
-    vx: 0.1,
-    curve: 0,
-  });
-
-  const moved = tickGame(state, 1);
-
-  assert.ok(Math.abs(moved.drones[0].x - 1.05) < Number.EPSILON);
-  assert.equal(moved.drones[0].y, 0.5);
-});
-
-test('ordinary drones are retired only after moving fully beyond the fixed viewport', () => {
-  const partlyVisible = spawnDrone(createGameState(), {
-    x: 1.04,
-    y: 0.5,
-    vx: 0.01,
-    curve: 0,
-  });
-  const fullyGone = spawnDrone(createGameState(), {
-    x: 1.08,
-    y: 0.5,
-    vx: 0.01,
-    curve: 0,
-  });
-
-  assert.equal(tickGame(partlyVisible, 1).drones.length, 1);
-  assert.equal(tickGame(fullyGone, 1).drones.length, 0);
-});
-
-test('the default boss remains on-screen in the fixed world', () => {
+test('the default boss remains in its lane and approaches the player', () => {
   const state = spawnDrone(createGameState(), { kind: 'boss', curve: 0 });
 
   const moved = tickGame(state, 10);
 
   assert.equal(moved.drones[0].x, 0.5);
+  assert.ok(moved.drones[0].depth < state.drones[0].depth);
 });
 
 test('fireAt destroys a normal drone, scores it, and builds a timed combo', () => {
@@ -146,6 +116,40 @@ test('fireAt scales normalized coordinates to the rendered viewport aspect ratio
 
   assert.equal(visuallyOutside.hits, 0);
   assert.equal(visuallyOutside.signal, 90);
+});
+
+test('fireAt uses the larger projected hit radius of a nearer drone', () => {
+  const far = spawnDrone(createGameState(), {
+    x: 0.5,
+    y: 0.5,
+    depth: 0.8,
+    radius: 0.055,
+  });
+  const near = spawnDrone(createGameState(), {
+    x: 0.5,
+    y: 0.5,
+    depth: 0.2,
+    radius: 0.055,
+  });
+
+  assert.equal(fireAt(far, 0.54, 0.5, 0.1).hits, 0);
+  assert.equal(fireAt(near, 0.54, 0.5, 0.1).hits, 1);
+});
+
+test('crossing the breach depth removes an enemy and reduces signal', () => {
+  const state = spawnDrone(createGameState(), {
+    x: 0.5,
+    y: 0.5,
+    depth: BREACH_DEPTH + 0.01,
+    approachSpeed: 0.02,
+    breachDamage: 17,
+    curve: 0,
+  });
+
+  const next = tickGame(state, 1);
+
+  assert.equal(next.drones.length, 0);
+  assert.equal(next.signal, 83);
 });
 
 test('tickGame expires a combo after 1.2 seconds without a hit', () => {
@@ -190,20 +194,21 @@ test('a miss reduces signal and depleted signal ends the round', () => {
   assert.equal(state.endReason, 'signal');
 });
 
-test('tickGame moves drones and automatically spawns the boss at forty elapsed seconds', () => {
+test('tickGame advances drones in depth and automatically spawns the boss at forty elapsed seconds', () => {
   let state = createGameState();
   state = spawnDrone(state, {
     x: 0.2,
     y: 0.3,
-    vx: 0.1,
-    vy: 0.2,
+    depth: 0.8,
+    approachSpeed: 0.1,
     curve: 0,
   });
 
   const moved = tickGame(state, 1);
 
-  assert.ok(Math.abs(moved.drones[0].x - 0.3) < Number.EPSILON);
-  assert.ok(Math.abs(moved.drones[0].y - 0.5) < Number.EPSILON);
+  assert.equal(moved.drones[0].x, 0.2);
+  assert.equal(moved.drones[0].y, 0.3);
+  assert.ok(Math.abs(moved.drones[0].depth - 0.7) < Number.EPSILON);
 
   state = createGameState({ elapsed: 39, timeLeft: 21 });
   const next = tickGame(state, 1);
