@@ -32,6 +32,10 @@ TEMPLATE_URL = (
     "main/templates/video_minimax_h3_i2v.json"
 )
 TEMPLATE_SHA256 = "313b029321a8be303e827dad471bff3022ca564c8bf8c6198a3e70b65c599671"
+# KT's validator checks every combo widget even when turbo_mode=False. This
+# installed LoRA only satisfies the inactive branch's combo; the base H3 path
+# remains selected and the LoRA is never sampled.
+KT_INACTIVE_LORA = "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"
 ASSET_BASE_URL = (
     "https://raw.githubusercontent.com/Hariuncle/nuboard_game/"
     "main/game/assets/images"
@@ -175,9 +179,15 @@ def workflow_for(template: dict[str, Any], shot: dict[str, Any]) -> dict[str, An
     h3 = node(graph, 105)
     values = list(h3["widgets_values"])
     values[0:5] = [shot["prompt"], 1344, 768, 5, shot["seed"]]
+    values[10] = KT_INACTIVE_LORA
     h3["widgets_values"] = values
     h3["widgets_values_named"].update(
-        prompt=shot["prompt"], width=1344, height=768, value_1=5, noise_seed=shot["seed"]
+        prompt=shot["prompt"],
+        width=1344,
+        height=768,
+        value_1=5,
+        noise_seed=shot["seed"],
+        lora_name=KT_INACTIVE_LORA,
     )
 
     save = node(graph, 92)
