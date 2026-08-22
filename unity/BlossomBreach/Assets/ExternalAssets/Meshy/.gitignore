@@ -1,0 +1,6 @@
+# Raw 4K Meshy outputs are too large for GitHub and target hardware.
+# Commit the 8k-poly game-ready FBX from Assets/Resources/Meshy instead.
+AcornBomber/
+AcornBomberFront/model.glb
+AcornBomberFront/texture_*.png
+AcornBomberOptimized*
