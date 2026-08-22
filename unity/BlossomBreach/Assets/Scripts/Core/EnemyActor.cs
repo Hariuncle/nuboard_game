@@ -8,10 +8,7 @@ namespace BlossomBreach
         [Header("Approach")]
         [SerializeField] private float laneSway = 0.24f;
         [SerializeField] private float laneSwayFrequency = 1.7f;
-
-        [Header("Boss Core")]
-        [SerializeField] private float coreOpenDuration = 1.15f;
-        [SerializeField] private float coreClosedDuration = 1.45f;
+        [SerializeField, Min(0.1f)] private float chargeWarningDistance = 0.35f;
 
         [Header("Defeat")]
         [SerializeField] private float defeatedLifetime = 1.15f;
@@ -24,19 +21,29 @@ namespace BlossomBreach
         private float _swayPhase;
         private float _farViewportY;
         private float _nearViewportY;
+        private Vector3 _baseRootScale;
         private float _aliveTime;
         private float _defeatedTime;
         private float _staggerRemaining;
         private float _forcedCoreOpenUntil;
+        private float _chargeElapsed;
+        private float _chargeDuration;
         private int _health;
         private int _maxHealth;
         private int _shield;
         private bool _configured;
         private bool _breached;
+        private bool _isCharging;
 
         public EnemyKind Kind { get; private set; }
         public bool IsDefeated { get; private set; }
         public bool IsBossCoreOpen { get; private set; }
+        public bool IsCharging => _isCharging;
+        public float ChargeNormalized => !_isCharging || _chargeDuration <= 0f
+            ? 0f
+            : Mathf.Clamp01(_chargeElapsed / _chargeDuration);
+        public EnemyThreatStage ThreatStage { get; private set; }
+        public BossPattern CurrentBossPattern { get; private set; }
         public float HealthNormalized => _maxHealth <= 0 ? 0f : Mathf.Clamp01((float)_health / _maxHealth);
         public int ShieldRemaining => Mathf.Max(0, _shield);
 
@@ -60,12 +67,18 @@ namespace BlossomBreach
             _swayPhase = swayPhase;
             _farViewportY = Mathf.Clamp01(farViewportY);
             _nearViewportY = Mathf.Clamp01(nearViewportY);
+            _baseRootScale = transform.localScale;
             _aliveTime = 0f;
             _defeatedTime = 0f;
             _staggerRemaining = 0f;
             _forcedCoreOpenUntil = 0f;
+            _chargeElapsed = 0f;
+            _chargeDuration = GameRules.ChargeWarningDuration(kind);
             _breached = false;
+            _isCharging = false;
             IsDefeated = false;
+            ThreatStage = EnemyThreatStage.Distant;
+            CurrentBossPattern = BossPattern.GuardedCore;
 
             switch (kind)
             {
@@ -97,6 +110,11 @@ namespace BlossomBreach
             _configured = true;
             EnsureHitTarget();
             UpdateBossCoreState();
+            _game?.ReportThreatStage(this, ThreatStage, _chargeDuration);
+            if (Kind == EnemyKind.Boss)
+            {
+                _game?.ReportBossPattern(this, CurrentBossPattern);
+            }
         }
 
         public EnemyHitResult ReceiveHit(HitZone zone, bool powerShot)
@@ -221,13 +239,27 @@ namespace BlossomBreach
             UpdateBossCoreState();
 
             Vector3 position = transform.position;
-            if (_staggerRemaining > 0f)
+            if (_isCharging)
+            {
+                _chargeElapsed += Time.unscaledDeltaTime;
+            }
+            else if (_staggerRemaining > 0f)
             {
                 _staggerRemaining = Mathf.Max(0f, _staggerRemaining - Time.deltaTime);
             }
             else
             {
-                position.z -= _speed * Time.deltaTime;
+                float patternSpeed = Kind == EnemyKind.Boss
+                    ? GameRules.BossApproachSpeedMultiplier(CurrentBossPattern)
+                    : 1f;
+                position.z -= _speed * patternSpeed * Time.deltaTime;
+            }
+
+            if (!_isCharging && _game != null &&
+                position.z <= _game.BreachZ + chargeWarningDistance)
+            {
+                position.z = _game.BreachZ + chargeWarningDistance;
+                BeginChargeWarning();
             }
 
             float approachProgress = _game != null
@@ -253,12 +285,15 @@ namespace BlossomBreach
                     position.y);
             }
             transform.position = position;
+            UpdateChargePulse();
 
-            if (!_breached && _game != null && position.z <= _game.BreachZ)
+            if (!_breached && _isCharging && _chargeElapsed >= _chargeDuration)
             {
-                _breached = true;
-                _game.RegisterBreach(this);
-                Destroy(gameObject);
+                CompleteBreach();
+            }
+            else if (!_isCharging)
+            {
+                SetThreatStage(GameRules.ThreatStageAt(approachProgress));
             }
         }
 
@@ -270,15 +305,23 @@ namespace BlossomBreach
                 return;
             }
 
-            float cycleLength = Mathf.Max(0.1f, coreOpenDuration + coreClosedDuration);
-            float cycleTime = Mathf.Repeat(_aliveTime, cycleLength);
-            IsBossCoreOpen = _aliveTime < _forcedCoreOpenUntil || cycleTime >= coreClosedDuration;
+            BossPattern nextPattern = GameRules.BossPatternAt(_aliveTime);
+            if (nextPattern != CurrentBossPattern)
+            {
+                CurrentBossPattern = nextPattern;
+                _game?.ReportBossPattern(this, CurrentBossPattern);
+            }
+
+            IsBossCoreOpen = _aliveTime < _forcedCoreOpenUntil ||
+                GameRules.IsBossCoreOpen(CurrentBossPattern, _aliveTime);
         }
 
         private void BeginDefeat()
         {
             IsDefeated = true;
             _defeatedTime = 0f;
+            _isCharging = false;
+            transform.localScale = _baseRootScale;
 
             foreach (Collider targetCollider in GetComponentsInChildren<Collider>())
             {
@@ -298,6 +341,59 @@ namespace BlossomBreach
             {
                 Destroy(gameObject);
             }
+        }
+
+        private void BeginChargeWarning()
+        {
+            _isCharging = true;
+            _chargeElapsed = 0f;
+            _chargeDuration = GameRules.ChargeWarningDuration(Kind);
+            SetThreatStage(EnemyThreatStage.Charging);
+        }
+
+        private void CompleteBreach()
+        {
+            if (_breached || _game == null)
+            {
+                return;
+            }
+
+            _breached = true;
+            transform.localScale = _baseRootScale;
+            _game.RegisterBreach(this);
+            Destroy(gameObject);
+        }
+
+        private void SetThreatStage(EnemyThreatStage stage)
+        {
+            if (ThreatStage == stage)
+            {
+                return;
+            }
+
+            ThreatStage = stage;
+            _game?.ReportThreatStage(this, ThreatStage, _chargeDuration);
+        }
+
+        private void UpdateChargePulse()
+        {
+            if (!_isCharging)
+            {
+                transform.localScale = Vector3.Lerp(
+                    transform.localScale,
+                    _baseRootScale,
+                    Time.unscaledDeltaTime * 12f);
+                return;
+            }
+
+            float frequency = Kind == EnemyKind.Fast ? 10f
+                : Kind == EnemyKind.Bomber ? 8.5f
+                : Kind == EnemyKind.Boss ? 5f
+                : 6.5f;
+            float progress = ChargeNormalized;
+            float pulse = Mathf.Sin(_chargeElapsed * frequency * Mathf.PI * 2f);
+            float scale = 1f + pulse * (0.025f + progress * 0.025f) + progress * 0.055f;
+            transform.localScale = _baseRootScale * scale;
         }
 
         private void EnsureHitTarget()
@@ -345,6 +441,13 @@ namespace BlossomBreach
         private void Stagger(float seconds)
         {
             _staggerRemaining = Mathf.Max(_staggerRemaining, seconds);
+            if (_isCharging)
+            {
+                _isCharging = false;
+                _chargeElapsed = 0f;
+                transform.localScale = _baseRootScale;
+                SetThreatStage(EnemyThreatStage.Near);
+            }
             transform.position += Vector3.forward * (Kind == EnemyKind.Boss ? 0.28f : 0.48f);
         }
     }

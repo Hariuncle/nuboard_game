@@ -72,6 +72,12 @@ namespace BlossomBreach
         [SerializeField] private float comboDecayStepSeconds = 0.55f;
         [SerializeField, Range(1, 6)] private int maxActiveEnemies = 4;
 
+        [Header("Rhythm Rewards")]
+        [SerializeField, Min(0.5f)] private float purificationStreakWindow = 3.4f;
+        [SerializeField, Range(0.4f, 1f)] private float threatSlowMotionScale = 0.62f;
+        [SerializeField, Range(0.05f, 0.35f)] private float threatSlowMotionDuration = 0.18f;
+        [SerializeField, Min(0.2f)] private float threatSlowMotionCooldown = 1.25f;
+
         private readonly List<EnemyActor> _activeEnemies = new List<EnemyActor>();
         private float _elapsed;
         private float _nextSpawnAt;
@@ -81,9 +87,18 @@ namespace BlossomBreach
         private bool _waveWasActive;
         private float _nextComboDecayAt;
         private float _nextStatePublishAt;
+        private float _lastPurificationAt;
+        private float _nextSlowMotionAt;
+        private float _slowMotionEndsAt;
+        private float _slowMotionRestoreScale = 1f;
+        private float _appliedSlowMotionScale = 1f;
+        private bool _ownsSlowMotion;
 
         public event Action StateChanged;
         public event Action<ShotSignal> ShotResolved;
+        public event Action<ThreatSignal> ThreatChanged;
+        public event Action<PurificationRewardSignal> PurificationRewarded;
+        public event Action<BossPatternSignal> BossPatternChanged;
 
         public int Score { get; private set; }
         public int Purity { get; private set; }
@@ -91,6 +106,7 @@ namespace BlossomBreach
         public int Chapter { get; private set; }
         public int Combo { get; private set; }
         public int OverdriveShots { get; private set; }
+        public int PurificationStreak { get; private set; }
         public Vector2 AimViewport { get; private set; } = new Vector2(0.5f, 0.5f);
         public float SpawnZ => spawnZ;
         public float BreachZ => breachZ;
@@ -120,6 +136,7 @@ namespace BlossomBreach
 
         private void Update()
         {
+            UpdateSlowMotion();
             if (!_sessionRunning)
             {
                 return;
@@ -128,7 +145,8 @@ namespace BlossomBreach
             int previousChapter = Chapter;
             if (!_timerExpired)
             {
-                _elapsed = Mathf.Min(GameRules.SessionDuration, _elapsed + Time.deltaTime);
+                // Keep the mission at sixty real seconds even during brief threat slow-mo.
+                _elapsed = Mathf.Min(GameRules.SessionDuration, _elapsed + Time.unscaledDeltaTime);
             }
 
             TimeRemaining = Mathf.Max(0f, GameRules.SessionDuration - _elapsed);
@@ -193,6 +211,11 @@ namespace BlossomBreach
             {
                 NotifyStateChanged();
             }
+        }
+
+        private void OnDisable()
+        {
+            RestoreSlowMotion();
         }
 
         public void SetAim(Vector2 viewport)
@@ -305,6 +328,7 @@ namespace BlossomBreach
 
         public void Restart()
         {
+            RestoreSlowMotion();
             EnemyActor[] sceneEnemies = enemyRoot != null
                 ? enemyRoot.GetComponentsInChildren<EnemyActor>(true)
                 : Array.Empty<EnemyActor>();
@@ -328,6 +352,7 @@ namespace BlossomBreach
             Chapter = 1;
             Combo = 0;
             OverdriveShots = 0;
+            PurificationStreak = 0;
             AimViewport = new Vector2(0.5f, 0.5f);
             _elapsed = 0f;
             _nextSpawnAt = 0.65f;
@@ -336,6 +361,8 @@ namespace BlossomBreach
             _timerExpired = false;
             _waveWasActive = true;
             _nextComboDecayAt = float.PositiveInfinity;
+            _lastPurificationAt = float.NegativeInfinity;
+            _nextSlowMotionAt = 0f;
             NotifyStateChanged();
         }
 
@@ -351,6 +378,7 @@ namespace BlossomBreach
             Purity = Mathf.Max(0, Purity - breachDamage);
             Score = GameRules.ValueAfterPenalty(Score, breachDamage * 10);
             Combo = 0;
+            PurificationStreak = 0;
 
             if (Purity <= 0 || _timerExpired && enemy.Kind == EnemyKind.Boss)
             {
@@ -368,6 +396,7 @@ namespace BlossomBreach
             }
 
             _activeEnemies.Remove(enemy);
+            RegisterPurificationStreak();
             if (_timerExpired && enemy.Kind == EnemyKind.Boss)
             {
                 _sessionRunning = false;
@@ -393,6 +422,84 @@ namespace BlossomBreach
                     Score += chainResult.Score;
                 }
             }
+        }
+
+        internal void ReportThreatStage(
+            EnemyActor actor,
+            EnemyThreatStage stage,
+            float chargeDuration)
+        {
+            ThreatChanged?.Invoke(new ThreatSignal(actor, stage, chargeDuration));
+            if (stage == EnemyThreatStage.Charging)
+            {
+                TriggerThreatSlowMotion();
+            }
+        }
+
+        internal void ReportBossPattern(EnemyActor actor, BossPattern pattern)
+        {
+            BossPatternChanged?.Invoke(new BossPatternSignal(actor, pattern));
+        }
+
+        private void RegisterPurificationStreak()
+        {
+            float now = Time.unscaledTime;
+            PurificationStreak = now - _lastPurificationAt <= purificationStreakWindow
+                ? PurificationStreak + 1
+                : 1;
+            _lastPurificationAt = now;
+
+            int reward = GameRules.PurificationStreakReward(PurificationStreak);
+            if (reward <= 0)
+            {
+                return;
+            }
+
+            Score += reward;
+            OverdriveShots = Mathf.Min(6, OverdriveShots + 1);
+            PurificationRewarded?.Invoke(new PurificationRewardSignal(
+                PurificationStreak,
+                reward,
+                OverdriveShots));
+        }
+
+        private void TriggerThreatSlowMotion()
+        {
+            float now = Time.unscaledTime;
+            if (now < _nextSlowMotionAt || Time.timeScale <= 0.01f)
+            {
+                return;
+            }
+
+            _slowMotionRestoreScale = Time.timeScale;
+            _appliedSlowMotionScale = Mathf.Min(_slowMotionRestoreScale, threatSlowMotionScale);
+            Time.timeScale = _appliedSlowMotionScale;
+            _slowMotionEndsAt = now + threatSlowMotionDuration;
+            _nextSlowMotionAt = now + threatSlowMotionCooldown;
+            _ownsSlowMotion = true;
+        }
+
+        private void UpdateSlowMotion()
+        {
+            if (_ownsSlowMotion && Time.unscaledTime >= _slowMotionEndsAt)
+            {
+                RestoreSlowMotion();
+            }
+        }
+
+        private void RestoreSlowMotion()
+        {
+            if (!_ownsSlowMotion)
+            {
+                return;
+            }
+
+            if (Mathf.Approximately(Time.timeScale, _appliedSlowMotionScale))
+            {
+                Time.timeScale = _slowMotionRestoreScale;
+            }
+
+            _ownsSlowMotion = false;
         }
 
         private EnemyKind ChooseEnemyKind()

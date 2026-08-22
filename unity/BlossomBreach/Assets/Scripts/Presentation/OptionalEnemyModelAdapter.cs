@@ -65,7 +65,9 @@ namespace BlossomBreach
         private static readonly string[] DeathStates = { "DEATH", "Dead", "DEATH_FALL_BACK" };
 
         private static readonly Dictionary<EnemyKind, GameObject> RegisteredPrefabs = new();
+        private static readonly Dictionary<Material, Material> TunedMaterials = new();
         private static int activeExternalInstances;
+        private static Material contactShadowMaterial;
 
         private Animator animator;
         private bool ownsExternalSlot;
@@ -122,9 +124,10 @@ namespace BlossomBreach
             }
 
             DisableImportedColliders(model);
-            ConfigureRenderers(modelRenderers);
+            ConfigureRenderers(modelRenderers, kind);
             NormalizeModel(model.transform, visualRig, modelRenderers, spec.TargetHeight);
             HideProceduralBody(visualRig, model.transform, kind);
+            CreateContactShadow(enemyRoot.transform, kind);
 
             var adapter = enemyRoot.AddComponent<OptionalEnemyModelAdapter>();
             adapter.animator = model.GetComponentInChildren<Animator>(true);
@@ -262,18 +265,143 @@ namespace BlossomBreach
             return false;
         }
 
-        private static void ConfigureRenderers(Renderer[] renderers)
+        private static void ConfigureRenderers(Renderer[] renderers, EnemyKind kind)
         {
             for (var i = 0; i < renderers.Length; i++)
             {
                 renderers[i].shadowCastingMode = ShadowCastingMode.On;
                 renderers[i].receiveShadows = true;
+                var materials = renderers[i].sharedMaterials;
+                for (var materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+                    materials[materialIndex] = GetTunedMaterial(materials[materialIndex], kind);
+                renderers[i].sharedMaterials = materials;
                 if (renderers[i] is SkinnedMeshRenderer skinned)
                 {
                     skinned.updateWhenOffscreen = false;
                     skinned.quality = SkinQuality.Bone2;
                 }
             }
+        }
+
+        private static Material GetTunedMaterial(Material source, EnemyKind kind)
+        {
+            if (source == null) return null;
+            if (TunedMaterials.TryGetValue(source, out var cached) && cached != null) return cached;
+
+            var urp = Shader.Find("Universal Render Pipeline/Lit");
+            var tuned = urp != null ? new Material(urp) : new Material(source.shader);
+            tuned.name = $"{source.name} Premium";
+            tuned.enableInstancing = true;
+            tuned.hideFlags = HideFlags.DontSaveInBuild | HideFlags.DontSaveInEditor;
+
+            var baseTexture = ReadTexture(source, "_BaseMap", "_MainTex");
+            if (tuned.HasProperty("_BaseMap") && baseTexture != null) tuned.SetTexture("_BaseMap", baseTexture);
+            if (tuned.HasProperty("_MainTex") && baseTexture != null) tuned.SetTexture("_MainTex", baseTexture);
+            CopyTexture(source, tuned, "_BumpMap", "_BumpMap");
+            CopyTexture(source, tuned, "_MetallicGlossMap", "_MetallicGlossMap");
+            CopyTexture(source, tuned, "_OcclusionMap", "_OcclusionMap");
+
+            var sourceColor = ReadColor(source);
+            var grade = kind switch
+            {
+                EnemyKind.Scout => new Color(1f, 0.96f, 0.88f, 1f),
+                EnemyKind.Armored => new Color(0.91f, 0.95f, 1f, 1f),
+                EnemyKind.Boss => new Color(0.94f, 0.89f, 1f, 1f),
+                _ => new Color(1f, 0.97f, 0.92f, 1f)
+            };
+            var gradedColor = sourceColor * grade;
+            gradedColor.a = sourceColor.a;
+            if (tuned.HasProperty("_BaseColor")) tuned.SetColor("_BaseColor", gradedColor);
+            if (tuned.HasProperty("_Color")) tuned.SetColor("_Color", gradedColor);
+
+            var smoothness = kind switch
+            {
+                EnemyKind.Armored => 0.54f,
+                EnemyKind.Boss => 0.43f,
+                EnemyKind.Scout => 0.38f,
+                _ => 0.34f
+            };
+            if (tuned.HasProperty("_Smoothness")) tuned.SetFloat("_Smoothness", smoothness);
+            if (tuned.HasProperty("_Glossiness")) tuned.SetFloat("_Glossiness", smoothness);
+            if (tuned.HasProperty("_BumpScale")) tuned.SetFloat("_BumpScale", 0.82f);
+            if (tuned.HasProperty("_OcclusionStrength")) tuned.SetFloat("_OcclusionStrength", 0.92f);
+            if (tuned.HasProperty("_SpecularHighlights")) tuned.SetFloat("_SpecularHighlights", 1f);
+            if (tuned.HasProperty("_EnvironmentReflections")) tuned.SetFloat("_EnvironmentReflections", 1f);
+
+            TunedMaterials[source] = tuned;
+            return tuned;
+        }
+
+        private static Texture ReadTexture(Material source, string primary, string fallback)
+        {
+            if (source.HasProperty(primary))
+            {
+                var texture = source.GetTexture(primary);
+                if (texture != null) return texture;
+            }
+            return source.HasProperty(fallback) ? source.GetTexture(fallback) : source.mainTexture;
+        }
+
+        private static Color ReadColor(Material source)
+        {
+            if (source.HasProperty("_BaseColor")) return source.GetColor("_BaseColor");
+            if (source.HasProperty("_Color")) return source.GetColor("_Color");
+            return source.color;
+        }
+
+        private static void CopyTexture(Material source, Material target, string targetProperty,
+            string sourceProperty)
+        {
+            if (!target.HasProperty(targetProperty) || !source.HasProperty(sourceProperty)) return;
+            var texture = source.GetTexture(sourceProperty);
+            if (texture != null) target.SetTexture(targetProperty, texture);
+        }
+
+        private static void CreateContactShadow(Transform enemyRoot, EnemyKind kind)
+        {
+            var shadowRoot = new GameObject("Soft Contact Shadow").transform;
+            shadowRoot.SetParent(enemyRoot, false);
+            shadowRoot.localPosition = new Vector3(0f, 0.025f, 0.03f);
+            var size = kind == EnemyKind.Boss ? 1.35f : kind == EnemyKind.Armored ? 1.05f : 0.88f;
+            CreateShadowDisc(shadowRoot, new Vector3(size, 0.012f, size * 0.63f));
+            CreateShadowDisc(shadowRoot, new Vector3(size * 0.66f, 0.014f, size * 0.40f));
+        }
+
+        private static void CreateShadowDisc(Transform parent, Vector3 scale)
+        {
+            var disc = ProceduralCatFactory.Part("Contact Shadow Disc", PrimitiveType.Cylinder, parent,
+                Vector3.zero, scale, new Color(0.12f, 0.08f, 0.20f));
+            var renderer = disc.GetComponent<Renderer>();
+            renderer.sharedMaterial = GetContactShadowMaterial();
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
+
+        private static Material GetContactShadowMaterial()
+        {
+            if (contactShadowMaterial != null) return contactShadowMaterial;
+            var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            contactShadowMaterial = new Material(shader)
+            {
+                name = "Shared Soft Contact Shadow",
+                enableInstancing = true,
+                hideFlags = HideFlags.DontSaveInBuild | HideFlags.DontSaveInEditor,
+                renderQueue = (int)RenderQueue.Transparent
+            };
+            var color = new Color(0.10f, 0.06f, 0.16f, 0.18f);
+            if (contactShadowMaterial.HasProperty("_BaseColor"))
+                contactShadowMaterial.SetColor("_BaseColor", color);
+            if (contactShadowMaterial.HasProperty("_Color")) contactShadowMaterial.SetColor("_Color", color);
+            if (contactShadowMaterial.HasProperty("_Surface")) contactShadowMaterial.SetFloat("_Surface", 1f);
+            if (contactShadowMaterial.HasProperty("_Blend")) contactShadowMaterial.SetFloat("_Blend", 0f);
+            if (contactShadowMaterial.HasProperty("_SrcBlend"))
+                contactShadowMaterial.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            if (contactShadowMaterial.HasProperty("_DstBlend"))
+                contactShadowMaterial.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+            if (contactShadowMaterial.HasProperty("_ZWrite")) contactShadowMaterial.SetFloat("_ZWrite", 0f);
+            if (contactShadowMaterial.HasProperty("_Cull")) contactShadowMaterial.SetFloat("_Cull", 0f);
+            contactShadowMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            return contactShadowMaterial;
         }
 
         private static void NormalizeModel(Transform model, Transform rig, Renderer[] renderers, float targetHeight)

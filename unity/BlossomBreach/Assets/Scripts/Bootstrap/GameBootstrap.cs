@@ -27,6 +27,7 @@ namespace BlossomBreach
         private bool introFailed;
         private bool gateAccepted;
         private static Font uiFont;
+        private static Sprite targetCircleSprite;
 
         private IEnumerator Start()
         {
@@ -107,26 +108,33 @@ namespace BlossomBreach
 
             long frameReadyCount = 0;
             long lastFrameIndex = -1;
-            bool firstFrameLogged = false;
+            bool firstFrameReceivedLogged = false;
+            bool firstFramePresentedLogged = false;
+            bool blitFailureLogged = false;
+            RenderTexture displayTarget = null;
             VideoPlayer.FrameReadyEventHandler frameReadyHandler = (source, frameIndex) =>
             {
                 frameReadyCount++;
                 lastFrameIndex = frameIndex;
-                if (source.texture != null)
+                if (!firstFrameReceivedLogged)
                 {
-                    screen.texture = source.texture;
-                }
-
-                if (!firstFrameLogged)
-                {
-                    firstFrameLogged = true;
-                    Debug.Log($"인트로 첫 프레임 수신: {frameIndex}.");
+                    firstFrameReceivedLogged = true;
+                    Debug.Log(
+                        $"인트로 첫 프레임 수신: {frameIndex}, " +
+                        $"영상 {source.width}x{source.height}, source={DescribeTexture(source.texture)}.");
                 }
             };
             player.frameReady += frameReadyHandler;
 
             RectTransform skipTarget = BuildIntroSkipPrompt(introRoot.transform);
             RectTransform menuReticle = BuildMenuReticle(introRoot.transform);
+            screen.rectTransform.SetAsFirstSibling();
+            skipTarget.SetAsLastSibling();
+            Canvas.ForceUpdateCanvases();
+            Debug.Log(
+                $"인트로 UI 계층: video={screen.rectTransform.GetSiblingIndex()}, " +
+                $"reticle={menuReticle.GetSiblingIndex()}, skip={skipTarget.GetSiblingIndex()}, " +
+                $"canvas={introRoot.GetComponent<RectTransform>().rect.size}, screen={screen.rectTransform.rect.size}.");
             skipIntro = false;
             introFailed = false;
             player.Prepare();
@@ -147,8 +155,36 @@ namespace BlossomBreach
                     player.SetTargetAudioSource(0, introAudio);
                 }
 
+                int videoWidth = player.width > 0 ? Mathf.Clamp((int)player.width, 16, 4096) : 1920;
+                int videoHeight = player.height > 0 ? Mathf.Clamp((int)player.height, 16, 4096) : 1080;
+                displayTarget = new RenderTexture(
+                    videoWidth,
+                    videoHeight,
+                    0,
+                    RenderTextureFormat.ARGB32,
+                    RenderTextureReadWrite.Default)
+                {
+                    name = "인트로 표시 버퍼",
+                    filterMode = FilterMode.Bilinear,
+                    wrapMode = TextureWrapMode.Clamp,
+                    useMipMap = false,
+                    autoGenerateMips = false
+                };
+                if (!displayTarget.Create())
+                {
+                    Debug.LogWarning("인트로 표시 버퍼를 만들지 못했습니다. 영상 텍스처를 직접 표시합니다.");
+                    Destroy(displayTarget);
+                    displayTarget = null;
+                }
+                else
+                {
+                    screen.texture = displayTarget;
+                }
+
                 player.Play();
-                Debug.Log("인트로 영상 재생 시작.");
+                Debug.Log(
+                    $"인트로 영상 재생 시작: player={player.width}x{player.height}, " +
+                    $"display={DescribeTexture(displayTarget)}, screen={DescribeTexture(screen.texture)}.");
                 float skipEnabledAt = Time.realtimeSinceStartup + IntroSkipGraceSeconds;
                 bool releaseObserved = false;
                 while (!skipIntro && !introFailed)
@@ -156,12 +192,20 @@ namespace BlossomBreach
                     UpdateMenuReticle(menuReticle);
                     if (player.frame >= 0 && player.texture != null)
                     {
-                        screen.texture = player.texture;
-                        if (!firstFrameLogged)
+                        bool presented = TryPresentIntroFrame(
+                            player.texture,
+                            screen,
+                            displayTarget,
+                            ref blitFailureLogged,
+                            out string presentationPath);
+                        if (presented && !firstFramePresentedLogged)
                         {
-                            firstFrameLogged = true;
+                            firstFramePresentedLogged = true;
                             lastFrameIndex = player.frame;
-                            Debug.Log($"인트로 첫 프레임 표시: {player.frame} (폴백 경로).");
+                            Debug.Log(
+                                $"인트로 첫 프레임 표시 확인: frame={player.frame}, path={presentationPath}, " +
+                                $"source={DescribeTexture(player.texture)}, screen={DescribeTexture(screen.texture)}, " +
+                                $"alpha={screen.canvasRenderer.GetAlpha():0.00}, uv={screen.uvRect}.");
                         }
                     }
 
@@ -192,8 +236,15 @@ namespace BlossomBreach
             player.Stop();
             introAudio.Stop();
             player.frameReady -= frameReadyHandler;
-            screen.texture = null;
-            Debug.Log($"인트로 종료: frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}.");
+            screen.texture = Texture2D.blackTexture;
+            if (displayTarget != null)
+            {
+                displayTarget.Release();
+                Destroy(displayTarget);
+            }
+            Debug.Log(
+                $"인트로 종료: frameReady {frameReadyCount}회, 마지막 프레임 {lastFrameIndex}, " +
+                $"표시 성공={firstFramePresentedLogged}.");
             Destroy(introRoot);
         }
 
@@ -360,7 +411,7 @@ namespace BlossomBreach
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = image;
 
-            Sprite circle = Resources.GetBuiltinResource<Sprite>("UI/Skin/Knob.psd");
+            Sprite circle = GetTargetCircleSprite();
             Image outerRing = CreateImage("표적 외곽", rect, new Color32(255, 102, 133, 255));
             outerRing.sprite = circle;
             outerRing.preserveAspect = true;
@@ -419,6 +470,48 @@ namespace BlossomBreach
             return mouseHeld || touchHeld;
         }
 
+        private static bool TryPresentIntroFrame(
+            Texture source,
+            RawImage screen,
+            RenderTexture displayTarget,
+            ref bool blitFailureLogged,
+            out string presentationPath)
+        {
+            if (displayTarget != null && displayTarget.IsCreated())
+            {
+                try
+                {
+                    Graphics.Blit(source, displayTarget);
+                    screen.texture = displayTarget;
+                    screen.color = Color.white;
+                    screen.canvasRenderer.SetAlpha(1f);
+                    presentationPath = "Graphics.Blit";
+                    return true;
+                }
+                catch (System.Exception exception)
+                {
+                    if (!blitFailureLogged)
+                    {
+                        blitFailureLogged = true;
+                        Debug.LogWarning($"인트로 프레임 복사 실패, 직접 표시로 전환합니다: {exception.Message}");
+                    }
+                }
+            }
+
+            screen.texture = source;
+            screen.color = Color.white;
+            screen.canvasRenderer.SetAlpha(1f);
+            presentationPath = "직접 텍스처";
+            return screen.texture != null;
+        }
+
+        private static string DescribeTexture(Texture texture)
+        {
+            return texture == null
+                ? "null"
+                : $"{texture.name}({texture.width}x{texture.height})";
+        }
+
         private static Font GetUiFont()
         {
             if (uiFont == null)
@@ -435,6 +528,52 @@ namespace BlossomBreach
             return uiFont;
         }
 
+        private static Sprite GetTargetCircleSprite()
+        {
+            if (targetCircleSprite != null)
+            {
+                return targetCircleSprite;
+            }
+
+            const int size = 64;
+            float center = (size - 1) * 0.5f;
+            float radius = center - 0.5f;
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x - center;
+                    float dy = y - center;
+                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                    float alpha = Mathf.Clamp01(radius + 1f - distance);
+                    pixels[y * size + x] = new Color32(
+                        255,
+                        255,
+                        255,
+                        (byte)Mathf.RoundToInt(alpha * 255f));
+                }
+            }
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                name = "인트로 원형 표적 텍스처",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            targetCircleSprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f),
+                size);
+            targetCircleSprite.name = "인트로 원형 표적";
+            targetCircleSprite.hideFlags = HideFlags.HideAndDontSave;
+            return targetCircleSprite;
+        }
+
         private static RawImage CreateFullscreenRawImage(Transform parent)
         {
             GameObject screenObject = new GameObject("Video", typeof(RectTransform), typeof(RawImage), typeof(AspectRatioFitter));
@@ -446,7 +585,12 @@ namespace BlossomBreach
             rect.offsetMax = Vector2.zero;
             RawImage image = screenObject.GetComponent<RawImage>();
             image.color = Color.white;
+            image.texture = Texture2D.blackTexture;
+            image.material = null;
+            image.uvRect = new Rect(0f, 0f, 1f, 1f);
             image.raycastTarget = false;
+            image.canvasRenderer.SetAlpha(1f);
+            image.rectTransform.SetAsFirstSibling();
             AspectRatioFitter fitter = screenObject.GetComponent<AspectRatioFitter>();
             fitter.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
             fitter.aspectRatio = 16f / 9f;

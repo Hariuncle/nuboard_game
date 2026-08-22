@@ -11,6 +11,61 @@ namespace BlossomBreach
         Boss
     }
 
+    public enum EnemyThreatStage
+    {
+        Distant,
+        Advancing,
+        Near,
+        Charging
+    }
+
+    public enum BossPattern
+    {
+        GuardedCore,
+        PetalBurst,
+        Pounce
+    }
+
+    public readonly struct ThreatSignal
+    {
+        public ThreatSignal(EnemyActor actor, EnemyThreatStage stage, float chargeDuration)
+        {
+            Actor = actor;
+            Stage = stage;
+            ChargeDuration = chargeDuration;
+        }
+
+        public EnemyActor Actor { get; }
+        public EnemyThreatStage Stage { get; }
+        public float ChargeDuration { get; }
+    }
+
+    public readonly struct PurificationRewardSignal
+    {
+        public PurificationRewardSignal(int streak, int score, int overdriveShots)
+        {
+            Streak = streak;
+            Score = score;
+            OverdriveShots = overdriveShots;
+        }
+
+        public int Streak { get; }
+        public int Score { get; }
+        public int OverdriveShots { get; }
+    }
+
+    public readonly struct BossPatternSignal
+    {
+        public BossPatternSignal(EnemyActor actor, BossPattern pattern)
+        {
+            Actor = actor;
+            Pattern = pattern;
+        }
+
+        public EnemyActor Actor { get; }
+        public BossPattern Pattern { get; }
+    }
+
     /// <summary>
     /// Marks a collider as a special target area. Procedural factories may leave both
     /// flags false to create an ordinary body hit zone.
@@ -114,6 +169,76 @@ namespace BlossomBreach
         public static bool GrantsOverdrive(int comboAfterHit)
         {
             return comboAfterHit >= HitsForOverdrive;
+        }
+
+        public static float ChargeWarningDuration(EnemyKind kind)
+        {
+            switch (kind)
+            {
+                case EnemyKind.Fast: return 0.8f;
+                case EnemyKind.Bomber: return 0.9f;
+                case EnemyKind.Armored: return 1.15f;
+                case EnemyKind.Boss: return 1.2f;
+                default: return 1f;
+            }
+        }
+
+        public static EnemyThreatStage ThreatStageAt(float approachProgress)
+        {
+            if (approachProgress >= 0.9f)
+            {
+                return EnemyThreatStage.Near;
+            }
+
+            return approachProgress >= 0.55f
+                ? EnemyThreatStage.Advancing
+                : EnemyThreatStage.Distant;
+        }
+
+        public static bool GrantsPurificationStreakReward(int streak)
+        {
+            return streak > 0 && streak % 3 == 0;
+        }
+
+        public static int PurificationStreakReward(int streak)
+        {
+            return GrantsPurificationStreakReward(streak) ? 180 + streak * 40 : 0;
+        }
+
+        public static BossPattern BossPatternAt(float aliveSeconds)
+        {
+            float cycle = Mathf.Repeat(Mathf.Max(0f, aliveSeconds), 9.6f);
+            if (cycle < 3.4f)
+            {
+                return BossPattern.GuardedCore;
+            }
+
+            return cycle < 6.6f ? BossPattern.PetalBurst : BossPattern.Pounce;
+        }
+
+        public static bool IsBossCoreOpen(BossPattern pattern, float aliveSeconds)
+        {
+            float cycle = Mathf.Repeat(Mathf.Max(0f, aliveSeconds), 9.6f);
+            switch (pattern)
+            {
+                case BossPattern.PetalBurst:
+                    return Mathf.Repeat(cycle - 3.4f, 0.78f) >= 0.38f;
+                case BossPattern.Pounce:
+                    float pounceTime = cycle - 6.6f;
+                    return pounceTime >= 0.72f && pounceTime <= 1.9f;
+                default:
+                    return cycle >= 1.45f;
+            }
+        }
+
+        public static float BossApproachSpeedMultiplier(BossPattern pattern)
+        {
+            switch (pattern)
+            {
+                case BossPattern.PetalBurst: return 0.94f;
+                case BossPattern.Pounce: return 1.22f;
+                default: return 1f;
+            }
         }
 
         public static float ApproachProgress(float worldZ, float spawnZ, float breachZ)

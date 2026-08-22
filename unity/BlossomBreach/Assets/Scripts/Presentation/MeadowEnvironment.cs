@@ -400,43 +400,67 @@ namespace BlossomBreach
         {
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = 0.0075f;
-            RenderSettings.fogColor = new Color(0.43f, 0.40f, 0.58f);
+            RenderSettings.fogDensity = 0.0085f;
+            RenderSettings.fogColor = new Color(0.45f, 0.43f, 0.59f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.38f, 0.34f, 0.60f);
-            RenderSettings.ambientEquatorColor = new Color(0.43f, 0.48f, 0.38f);
-            RenderSettings.ambientGroundColor = new Color(0.18f, 0.18f, 0.23f);
+            RenderSettings.ambientSkyColor = new Color(0.42f, 0.39f, 0.66f);
+            RenderSettings.ambientEquatorColor = new Color(0.47f, 0.51f, 0.39f);
+            RenderSettings.ambientGroundColor = new Color(0.16f, 0.15f, 0.23f);
+            RenderSettings.reflectionIntensity = 0.58f;
+            RenderSettings.subtractiveShadowColor = new Color(0.19f, 0.16f, 0.28f);
+
+            var camera = Camera.main;
+            if (camera != null)
+            {
+                camera.backgroundColor = new Color(0.14f, 0.13f, 0.32f);
+                camera.farClipPlane = Mathf.Min(camera.farClipPlane, 80f);
+                camera.allowHDR = false;
+            }
 
             var lights = Object.FindObjectsByType<Light>();
-            var hasSun = false;
-            var hasRim = false;
+            Light sun = null;
+            Light fill = null;
             foreach (var candidate in lights)
             {
-                if (candidate.name == "Meadow Rim Light") hasRim = true;
-                else if (candidate.type == LightType.Directional) hasSun = true;
+                if (candidate.type != LightType.Directional) continue;
+                if (candidate.name == "Meadow Sun") sun = candidate;
+                else if (candidate.name == "Sky Fill")
+                {
+                    if (fill != null && fill != candidate) fill.enabled = false;
+                    fill = candidate;
+                }
+                else if (candidate.name == "Meadow Rim Light")
+                {
+                    if (fill == null) fill = candidate;
+                    else candidate.enabled = false;
+                }
+                else if (sun == null) sun = candidate;
             }
 
-            if (!hasSun)
+            if (sun == null)
             {
-                var sun = new GameObject("Meadow Sun", typeof(Light));
-                sun.transform.rotation = Quaternion.Euler(48f, -32f, 0f);
-                var light = sun.GetComponent<Light>();
-                light.type = LightType.Directional;
-                light.color = new Color(1f, 0.82f, 0.57f);
-                light.intensity = 1.28f;
-                light.shadows = LightShadows.Soft;
+                var sunObject = new GameObject("Meadow Sun", typeof(Light));
+                sun = sunObject.GetComponent<Light>();
+                sun.type = LightType.Directional;
             }
+            sun.transform.rotation = Quaternion.Euler(45f, -30f, 0f);
+            sun.color = new Color(1f, 0.84f, 0.62f);
+            sun.intensity = 1.34f;
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.68f;
+            sun.shadowBias = 0.065f;
+            sun.shadowNormalBias = 0.36f;
 
-            if (!hasRim)
+            if (fill == null)
             {
-                var rim = new GameObject("Meadow Rim Light", typeof(Light));
-                rim.transform.rotation = Quaternion.Euler(24f, 148f, 0f);
-                var light = rim.GetComponent<Light>();
-                light.type = LightType.Directional;
-                light.color = new Color(0.42f, 0.34f, 0.92f);
-                light.intensity = 0.52f;
-                light.shadows = LightShadows.None;
+                var fillObject = new GameObject("Meadow Rim Light", typeof(Light));
+                fill = fillObject.GetComponent<Light>();
+                fill.type = LightType.Directional;
             }
+            fill.transform.rotation = Quaternion.Euler(24f, 148f, 0f);
+            fill.color = new Color(0.44f, 0.40f, 0.90f);
+            fill.intensity = 0.36f;
+            fill.shadows = LightShadows.None;
         }
     }
 }
