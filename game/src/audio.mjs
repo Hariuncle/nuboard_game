@@ -51,7 +51,7 @@ export function createGameAudio({
       const voice = prototype.cloneNode?.(true) ?? new AudioClass(prototype.src);
       voice.volume = prototype.volume;
       const result = voice.play();
-      result?.catch?.(() => {});
+      result?.catch?.(() => fallback.play?.(fallbackName(name)));
       return true;
     } catch {
       return fallback.play?.(fallbackName(name)) ?? false;
@@ -69,7 +69,12 @@ export function createGameAudio({
       music.volume = 0.32;
       musicName = name;
       const result = music.play();
-      result?.catch?.(() => {});
+      result?.catch?.(() => {
+        if (musicName === name) {
+          music = null;
+          musicName = null;
+        }
+      });
       return true;
     } catch {
       music = null;

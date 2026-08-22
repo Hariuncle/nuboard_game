@@ -20,6 +20,7 @@ const canvas = $("#game-canvas");
 const context = canvas.getContext("2d", { alpha: true });
 const video = $("#intro-video");
 const audio = createGameAudio();
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const spriteSheets = Object.fromEntries(
   Object.entries({
     raiders: "./assets/images/raiders-sheet.png",
@@ -75,6 +76,7 @@ let defeatedActors = [];
 let lastChapter = 1;
 let lastBossHp = null;
 let endingClock = 0;
+const exitTimers = new Set();
 let hitFlashTimer = 0;
 let lastControllerFireAt = -Infinity;
 const crosshair = { x: 0.5, y: 0.5, recoil: 0 };
@@ -107,7 +109,7 @@ function showScreen(name) {
 
 function beginCutscene() {
   void audio.unlock();
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || video.error) {
+  if (reducedMotion.matches || video.error) {
     startGame();
     return;
   }
@@ -139,6 +141,8 @@ function startGame() {
   lastChapter = 1;
   lastBossHp = null;
   endingClock = 0;
+  for (const timer of exitTimers) window.clearTimeout(timer);
+  exitTimers.clear();
   lastControllerFireAt = -Infinity;
   resizeCanvas();
   announce("LINK START");
@@ -333,10 +337,12 @@ function drawDrone(x, y, radius, drone, isBoss, animation = {}) {
   context.save();
   context.translate(x, y);
   if (animation.fallProgress) {
-    context.rotate(animation.fallDirection * animation.fallProgress * 1.35);
-    context.scale(1 - animation.fallProgress * .22, 1 - animation.fallProgress * .38);
+    if (!reducedMotion.matches) {
+      context.rotate(animation.fallDirection * animation.fallProgress * 1.35);
+      context.scale(1 - animation.fallProgress * .22, 1 - animation.fallProgress * .38);
+    }
     context.globalAlpha = 1 - animation.fallProgress;
-  } else if (animation.hitAge < .16) {
+  } else if (!reducedMotion.matches && animation.hitAge < .16) {
     const recoil = 1 - animation.hitAge / .16;
     context.rotate(Math.sin(animation.hitAge * 150) * .12 * recoil);
     context.scale(1 + recoil * .08, 1 - recoil * .12);
@@ -384,7 +390,7 @@ function drawDrone(x, y, radius, drone, isBoss, animation = {}) {
 
   const hp = numberFrom(drone, ["hp", "health"], 1);
   const maxHp = Math.max(1, numberFrom(drone, ["maxHp", "maxHealth"], hp));
-  if (maxHp > 1 && !isBoss) {
+  if (maxHp > 1 && !isBoss && !animation.fallProgress) {
     context.fillStyle = "rgba(0,0,0,.6)";
     context.fillRect(x - radius, y + radius + 9, radius * 2, 4);
     context.fillStyle = "#ff3fd2";
@@ -413,7 +419,7 @@ function drawCrosshair(x, y) {
 }
 
 function shoot() {
-  if (mode !== "game" || !state) return;
+  if (mode !== "game" || !state || state.phase !== "playing") return;
   audio.play("shot");
   const previousHits = state.hits;
   const previousBoss = entities().find((entity) => entity.kind === "boss");
@@ -433,7 +439,11 @@ function shoot() {
       defeatedActors.push({ ...shot.target, defeatAge: 0 });
       if (defeatedActors.length > 10) defeatedActors.splice(0, defeatedActors.length - 10);
       audio.play("fall");
-      window.setTimeout(() => audio.play("exit"), 420);
+      const exitTimer = window.setTimeout(() => {
+        exitTimers.delete(exitTimer);
+        if (mode === "game") audio.play("exit");
+      }, 420);
+      exitTimers.add(exitTimer);
       announce(shot.target.kind === "boss" ? "THORN WARDEN CLEANSED" : "FRIEND AWAKENED");
     } else {
       announce("CLEANSE HIT");
