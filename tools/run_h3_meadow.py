@@ -166,6 +166,15 @@ def set_widgets(item: dict[str, Any], values: list[Any], named: dict[str, Any]) 
 def workflow_for(template: dict[str, Any], shot: dict[str, Any]) -> dict[str, Any]:
     graph = copy.deepcopy(template)
 
+    for subgraph in graph.get("definitions", {}).get("subgraphs", []):
+        for inner in subgraph.get("nodes", []):
+            if inner.get("id") == 121 and inner.get("type") == "LoraLoaderModelOnly":
+                inner["widgets_values"] = [KT_INACTIVE_LORA, 1]
+                inner["widgets_values_named"] = {
+                    "lora_name": KT_INACTIVE_LORA,
+                    "strength_model": 1,
+                }
+
     load = node(graph, 114)
     set_widgets(load, [shot["image"], "image"], {"image": shot["image"], "upload": "image"})
 
