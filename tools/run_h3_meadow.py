@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,11 @@ def text_content(result: Any) -> str:
 
 
 def payload(result: Any) -> dict[str, Any]:
+    is_error = getattr(result, "is_error", None)
+    if is_error is None:
+        is_error = getattr(result, "isError", False)
+    if is_error:
+        raise RuntimeError(f"Comfy MCP tool failed: {text_content(result)}")
     structured = getattr(result, "structuredContent", None)
     if isinstance(structured, dict):
         return structured
@@ -210,7 +216,15 @@ async def wait_for_job(session: ClientSession, prompt_id: str) -> dict[str, Any]
 async def run(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     template_path = root / "video_minimax_h3_i2v.json"
-    download(TEMPLATE_URL, template_path, TEMPLATE_SHA256)
+    bundled_template = Path(__file__).resolve().parent / "templates" / "video_minimax_h3_i2v.json"
+    if bundled_template.exists():
+        data = bundled_template.read_bytes()
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != TEMPLATE_SHA256:
+            raise RuntimeError(f"Bundled template SHA-256 mismatch: {actual}")
+        shutil.copyfile(bundled_template, template_path)
+    else:
+        download(TEMPLATE_URL, template_path, TEMPLATE_SHA256)
     template = json.loads(template_path.read_text(encoding="utf-8"))
 
     for shot in SHOTS:
@@ -230,7 +244,8 @@ async def run(root: Path) -> None:
         workflow_paths.append(path)
 
     env = os.environ.copy()
-    env.update(COMFY_BIN=COMFY_BIN, COMFY_LOCAL_URL=COMFY_URL, COMFYUI_URL=COMFY_URL)
+    env.update(COMFY_BIN=COMFY_BIN, COMFY_LOCAL_URL=COMFY_URL)
+    env.pop("COMFYUI_URL", None)
     params = StdioServerParameters(command=MCP_BIN, args=[], env=env)
 
     async with stdio_client(params) as (read, write):
@@ -246,6 +261,16 @@ async def run(root: Path) -> None:
 
             info = payload(await session.call_tool("server_info", {}))
             print("SERVER_INFO", json.dumps(info, ensure_ascii=False)[:1000], flush=True)
+            resolved_url = (
+                find_value(info, "url")
+                or find_value(info, "base_url")
+                or find_value(info, "server_url")
+            )
+            if isinstance(resolved_url, str) and "127.0.0.1:8189" not in resolved_url:
+                raise RuntimeError(f"Comfy MCP resolved the wrong server: {resolved_url}")
+            running = find_value(info, "running")
+            if running is False:
+                raise RuntimeError(f"ComfyUI is not running: {info}")
 
             upload = payload(
                 await session.call_tool(
@@ -281,12 +306,29 @@ async def run(root: Path) -> None:
                 print("QUEUED", shot["slug"], prompt_id, flush=True)
 
                 await wait_for_job(session, prompt_id)
+                before_media = {
+                    path: (path.stat().st_mtime_ns, path.stat().st_size)
+                    for suffix in ("*.mp4", "*.webm", "*.mov", "*.mkv")
+                    for path in fetched_dir.rglob(suffix)
+                }
                 fetched = payload(
                     await session.call_tool(
                         "fetch_outputs", {"prompt_id": prompt_id, "out_dir": str(fetched_dir)}
                     )
                 )
                 print("FETCHED", shot["slug"], json.dumps(fetched, ensure_ascii=False), flush=True)
+                after_media = [
+                    path
+                    for suffix in ("*.mp4", "*.webm", "*.mov", "*.mkv")
+                    for path in fetched_dir.rglob(suffix)
+                    if path.stat().st_size > 0
+                    and before_media.get(path) != (path.stat().st_mtime_ns, path.stat().st_size)
+                ]
+                if not after_media:
+                    raise RuntimeError(
+                        f"fetch_outputs returned without a new playable video: {fetched}"
+                    )
+                print("VERIFIED_MEDIA", shot["slug"], *(str(path) for path in after_media), flush=True)
 
     print("H3_MEADOW_I2V_ALL_DONE", fetched_dir, flush=True)
 
