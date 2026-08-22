@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>NU-40 DK 3-TFT Exact Real-Time Screen Mirroring</title>
+  <style>
+    :root {
+      --bg-color: #0c0d14;
+      --card-bg: #141622;
+      --border-color: #272a3d;
+      --neon-cyan: #00f0ff;
+      --neon-green: #00ff66;
+      --neon-yellow: #ffee00;
+      --neon-pink: #ff0077;
+      --neon-red: #ff2244;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--bg-color);
+      color: #e0e6ed;
+      font-family: 'Consolas', 'Courier New', monospace;
+      margin: 0;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h1 {
+      margin: 0 0 5px 0;
+      font-size: 22px;
+      color: var(--neon-cyan);
+      letter-spacing: 1px;
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+    }
+    .subtitle {
+      color: #7d859d;
+      font-size: 12px;
+      margin-bottom: 15px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      align-items: center;
+      background: var(--card-bg);
+      padding: 8px 18px;
+      border-radius: 40px;
+      border: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .btn {
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: bold;
+      font-family: inherit;
+      border-radius: 20px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-ble {
+      background: linear-gradient(135deg, #0077ff, #00c3ff);
+      color: #fff;
+      box-shadow: 0 0 15px rgba(0, 150, 255, 0.4);
+    }
+    .btn-ble:hover { transform: translateY(-2px); box-shadow: 0 0 20px rgba(0, 195, 255, 0.7); }
+    .btn-serial {
+      background: #2a2e45;
+      color: #b0b8db;
+    }
+    .btn-serial:hover { background: #383d5c; color: #fff; }
+    .badge {
+      font-size: 12px;
+      padding: 6px 14px;
+      border-radius: 15px;
+      background: #1e202f;
+      color: #ff4466;
+      font-weight: bold;
+    }
+    .badge.connected {
+      background: #003318;
+      color: var(--neon-green);
+      border: 1px solid var(--neon-green);
+      text-shadow: 0 0 8px var(--neon-green);
+    }
+
+    /* 🎮 NU-40 DK 3-TFT 물리 콘솔 베젤 */
+    .console-frame {
+      background: #12141c;
+      padding: 20px;
+      border-radius: 20px;
+      border: 2px solid #2e334a;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      position: relative;
+    }
+    .console-label {
+      position: absolute;
+      top: -12px;
+      left: 30px;
+      background: var(--bg-color);
+      padding: 2px 14px;
+      font-size: 11px;
+      font-weight: bold;
+      color: var(--neon-cyan);
+      border: 1px solid #2e334a;
+      border-radius: 10px;
+      letter-spacing: 2px;
+    }
+
+    /* 3개 독립 TFT 디스플레이 (각각 256x320 px, 128x160의 2배 정밀 스케일) */
+    .tft-bezel {
+      background: #000;
+      border-radius: 8px;
+      padding: 8px;
+      box-shadow: inset 0 0 10px #000, 0 4px 15px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .tft-title {
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 6px;
+      letter-spacing: 1px;
+    }
+    .tft-canvas {
+      width: 256px;
+      height: 320px;
+      background: #000;
+      border-radius: 4px;
+      image-rendering: pixelated;
+    }
+
+    .tft1-box { border: 2px solid #554400; }
+    .tft2-box { border: 2px solid #005522; }
+    .tft3-box { border: 2px solid #004455; }
+
+    /* 실시간 로그 콘솔 */
+    .log-box {
+      margin-top: 15px;
+      width: 100%;
+      max-width: 860px;
+      background: #141622;
+      border: 1px solid #272a3d;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      color: #8fa0b5;
+      height: 70px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🛸 NU-40 DK 3-TFT REAL-TIME HARDWARE MIRROR</h1>
+  <div class="subtitle">NU-40 3개 화면 100% 동일 1:1 실시간 미러링 (Web Bluetooth & Web Serial 지원)</div>
+
+  <div class="toolbar">
+    <button class="btn btn-ble" id="btnBle" onclick="connectBLE()">📡 [savethe earth] 블루투스 연결</button>
+    <button class="btn btn-serial" id="btnSerial" onclick="connectSerial()">🔌 USB 시리얼 연결</button>
+    <div class="badge" id="statusBadge">● 연결 대기 중</div>
+  </div>
+
+  <!-- 🕹️ 3-TFT 하드웨어 콘솔 섀시 -->
+  <div class="console-frame">
+    <div class="console-label">NU-40 DK SPATIAL SHOOTER DIGITAL TWIN</div>
+
+    <!-- [TFT 1] 좌측 트리거 HUD -->
+    <div class="tft-bezel tft1-box">
+      <div class="tft-title" style="color: var(--neon-yellow);">TFT 1 : TRIGGER HUD</div>
+      <canvas class="tft-canvas" id="canvas1" width="256" height="320"></canvas>
+    </div>
+
+    <!-- [TFT 2] 중앙 메인 전장 -->
+    <div class="tft-bezel tft2-box">
+      <div class="tft-title" style="color: var(--neon-green);">TFT 2 : MAIN BATTLEFIELD</div>
+      <canvas class="tft-canvas" id="canvas2" width="256" height="320"></canvas>
+    </div>
+
+    <!-- [TFT 3] 우측 미션 스코어보드 -->
+    <div class="tft-bezel tft3-box">
+      <div class="tft-title" style="color: var(--neon-cyan);">TFT 3 : MISSION STATS</div>
+      <canvas class="tft-canvas" id="canvas3" width="256" height="320"></canvas>
+    </div>
+  </div>
+
+  <div class="log-box" id="logBox">
+    [LOG] 준비 완료. '블루투스 연결' 또는 'USB 시리얼 연결' 버튼을 클릭하세요.<br>
+  </div>
+
+  <script>
+    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const NUS_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+    const ctx1 = document.getElementById('canvas1').getContext('2d');
+    const ctx2 = document.getElementById('canvas2').getContext('2d');
+    const ctx3 = document.getElementById('canvas3').getContext('2d');
+
+    let rxCharacteristic = null;
+    let serialPort = null;
+    let rawBuffer = "";
+    let packetCount = 0;
+    let lastFpsTime = performance.now();
+    let currentFps = 0;
+
+    // 텔레메트리 최신 상태
+    let state = {
+      gx: 64, gy: 80, trg: 0, prs: 0, adc: 0, hp: 100,
+      stg: 1, scr: 0, cmb: 0, amo: 10, rld: 0, gst: 1,
+      ka: 0, kb: 0, kc: 0, kl: 0, tk: 3,
+      a: [
+        { id: 0, act: 1, t: 0, x: 64, y: 40, vx: 0.35, vy: 0.20, h: 1, m: 1, d: 0 },
+        { id: 1, act: 1, t: 1, x: 40, y: 60, vx: -0.28, vy: 0.16, h: 2, m: 2, d: 0 },
+        { id: 2, act: 1, t: 2, x: 88, y: 60, vx: 0.20, vy: 0.12, h: 2, m: 2, d: 0 }
+      ]
+    };
+
+    let hitMarkerTimer = 0;
+    let hitMarkerX = 64, hitMarkerY = 80;
+    let flashBorderTimer = 0;
+    let flashBorderColor = "#ff2244";
+
+    function log(msg) {
+      const b = document.getElementById('logBox');
+      b.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}<br>`;
+      b.scrollTop = b.scrollHeight;
+    }
+
+    // =========================================================================
+    // 📡 1. 블루투스 LE 무선 연결 (Web Bluetooth API)
+    // =========================================================================
+    async function connectBLE() {
+      try {
+        log("🔍 [BLE] 'savethe earth' 기기 검색 시작...");
+        updateStatus("기기 검색 중...", false);
+
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'savethe earth' }],
+          optionalServices: [NUS_SERVICE_UUID]
+        });
+
+        log(`✅ 기기 발견: ${device.name} (GATT 서버 연결 시도)`);
+        updateStatus("연결 중...", false);
+
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+        const server = await device.gatt.connect();
+        log("✅ GATT 서버 연결 성공. NUS 서비스 검색 중...");
+
+        const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+        log("✅ NUS 서비스 발견. 특성(Characteristic) 검색 중...");
+
+        // 모든 특성을 자동 탐색하여 Notify 특성에 리스너 등록
+        const characteristics = await service.getCharacteristics();
+        log(`ℹ️ 특성 ${characteristics.length}개 발견`);
+
+        let notifyCount = 0;
+        for (const ch of characteristics) {
+          log(`  - 특성: ${ch.uuid} (Notify: ${ch.properties.notify})`);
+          if (ch.properties.notify) {
+            ch.addEventListener('characteristicvaluechanged', (e) => {
+              const decoder = new TextDecoder('utf-8');
+              feedData(decoder.decode(e.target.value));
+            });
+            await ch.startNotifications();
+            notifyCount++;
+            log(`✅ 특성 [${ch.uuid.substring(0, 8)}] 알림(Notification) 활성화 성공!`);
+          }
+        }
+
+        if (notifyCount === 0) {
+          const rxChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
+          rxChar.addEventListener('characteristicvaluechanged', (e) => {
+            const decoder = new TextDecoder('utf-8');
+            feedData(decoder.decode(e.target.value));
+          });
+          await rxChar.startNotifications();
+        }
+
+        log("🎉 [BLE] 실시간 텔레메트리 스트리밍 수신 시작!");
+        updateStatus("● BLE 연결됨 (savethe earth)", true);
+        document.getElementById('btnBle').innerText = "🔗 BLE 연결됨";
+      } catch (err) {
+        log(`❌ BLE 오류: ${err.message}`);
+        updateStatus("❌ BLE 연결 실패", false);
+      }
+    }
+
+    function onDisconnected(event) {
+      log("⚠️ 기기와의 블루투스 연결이 끊어졌습니다.");
+      updateStatus("● 연결 해제됨", false);
+      document.getElementById('btnBle').innerText = "📡 [savethe earth] 블루투스 연결";
+    }
+
+    // =========================================================================
+    // 🔌 2. USB 시리얼 유선 연결 (Web Serial API)
+    // =========================================================================
+    async function connectSerial() {
+      try {
+        if (!navigator.serial) {
+          alert("이 브라우저는 Web Serial API를 지원하지 않습니다. Chrome 또는 Edge를 사용하세요.");
+          return;
+        }
+        log("🔍 [USB] 시리얼 포트 선택 창 열기...");
+        serialPort = await navigator.serial.requestPort();
+        await serialPort.open({ baudRate: 115200 });
+
+        log("✅ USB 시리얼 포트 열림 (115200 bps). 실시간 수신 시작!");
+        updateStatus("● USB 연결됨 (115200)", true);
+        document.getElementById('btnSerial').innerText = "🔗 USB 연결됨";
+
+        readSerialLoop();
+      } catch (err) {
+        log(`❌ USB 시리얼 오류: ${err.message}`);
+        updateStatus("❌ USB 연결 실패", false);
+      }
+    }
+
+    async function readSerialLoop() {
+      const textDecoder = new TextDecoderStream();
+      const readableStreamClosed = serialPort.readable.pipeTo(textDecoder.writable);
+      const reader = textDecoder.readable.getReader();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) feedData(value);
+      }
+    }
+
+    function findCompleteJson(str) {
+      const startIdx = str.indexOf('{');
+      if (startIdx === -1) return null;
+
+      let depth = 0;
+      for (let i = startIdx; i < str.length; i++) {
+        if (str[i] === '{') depth++;
+        else if (str[i] === '}') {
+          depth--;
+          if (depth === 0) {
+            return {
+              start: startIdx,
+              end: i + 1,
+              json: str.substring(startIdx, i + 1)
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    function feedData(text) {
+      rawBuffer += text;
+
+      while (true) {
+        const match = findCompleteJson(rawBuffer);
+        if (!match) {
+          if (rawBuffer.indexOf('{') === -1) {
+            rawBuffer = "";
+          }
+          break;
+        }
+
+        rawBuffer = rawBuffer.substring(match.end);
+
+        try {
+          const d = JSON.parse(match.json);
+          Object.assign(state, d);
+          packetCount++;
+
+          document.getElementById('statusBadge').innerText = `● 실시간 수신 중 (${packetCount} pkts | Aim:${d.gx},${d.gy} | Prs:${d.prs}%)`;
+
+          if (d.trg === 1) {
+            hitMarkerX = d.gx;
+            hitMarkerY = d.gy;
+            hitMarkerTimer = 5;
+            flashBorderTimer = 4;
+            flashBorderColor = "#ffee00";
+          }
+        } catch (e) {
+          log(`⚠️ JSON 파싱 오류: ${e.message}`);
+        }
+      }
+
+      if (rawBuffer.length > 2048) rawBuffer = rawBuffer.substring(rawBuffer.length - 256);
+    }
+
+    function updateStatus(text, isConnected) {
+      const badge = document.getElementById('statusBadge');
+      badge.innerText = text;
+      if (isConnected) badge.classList.add('connected');
+      else badge.classList.remove('connected');
+    }
+
+    // =========================================================================
+    // 🎨 3. 3-TFT 디스플레이 1:1 완벽 렌더링 루프 (60 FPS)
+    // =========================================================================
+    function render3TFTs() {
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        currentFps = packetCount;
+        packetCount = 0;
+        lastFpsTime = now;
+      }
+
+      renderTFT1();
+      renderTFT2();
+      renderTFT3();
+
+      requestAnimationFrame(render3TFTs);
+    }
+
+    // -------------------------------------------------------------------------
+    // [TFT 1] 좌측 트리거 HUD 렌더링
+    // -------------------------------------------------------------------------
+    function renderTFT1() {
+      ctx1.fillStyle = "#000000";
+      ctx1.fillRect(0, 0, 256, 320);
+
+      // 노란색 외곽 프레임
+      ctx1.strokeStyle = "#ffee00";
+      ctx1.lineWidth = 2;
+      ctx1.strokeRect(2, 2, 252, 316);
+      ctx1.beginPath(); ctx1.moveTo(2, 44); ctx1.lineTo(254, 44); ctx1.stroke();
+
+      // 상단 헤더
+      ctx1.fillStyle = "#ffee00";
+      ctx1.font = "bold 14px Consolas";
+      ctx1.fillText("TRIGGER HUD", 28, 28);
+
+      // 1. PRESSURE GAUGE
+      ctx1.fillStyle = "#ffffff";
+      ctx1.font = "12px Consolas";
+      ctx1.fillText("PRESSURE GAUGE:", 16, 68);
+
+      // 게이지 바 외곽
+      ctx1.strokeStyle = "#ffffff";
+      ctx1.strokeRect(12, 88, 232, 32);
+
+      // 게이지 채우기
+      const prs = state.prs || 0;
+      const fillW = (prs / 100) * 228;
+      ctx1.fillStyle = prs >= 60 ? "#ff2244" : (prs >= 25 ? "#ffee00" : "#00f0ff");
+      ctx1.fillRect(14, 90, fillW, 28);
+
+      // LEVEL 상태 텍스트
+      ctx1.fillStyle = "#ffffff";
+      ctx1.fillText("LEVEL :", 16, 146);
+      ctx1.font = "bold 13px Consolas";
+      if (prs >= 60) {
+        ctx1.fillStyle = "#ff2244";
+        ctx1.fillText(`FIRE (${prs}%)`, 108, 146);
+      } else if (prs >= 25) {
+        ctx1.fillStyle = "#ffee00";
+        ctx1.fillText(`HOLD (${prs}%)`, 108, 146);
+      } else {
+        ctx1.fillStyle = "#00f0ff";
+        ctx1.fillText(`IDLE (${prs}%)`, 108, 146);
+      }
+
+      // ADC 원시값
+      ctx1.fillStyle = "#ffffff";
+      ctx1.font = "12px Consolas";
+      ctx1.fillText("ADC   :", 16, 174);
+      ctx1.fillText(`${state.adc || 0}`, 108, 174);
+
+      // 구분선
+      ctx1.strokeStyle = "#333344";
+      ctx1.beginPath(); ctx1.moveTo(12, 196); ctx1.lineTo(244, 196); ctx1.stroke();
+
+      // HP 플레이어 체력
+      ctx1.fillStyle = "#00f0ff";
+      ctx1.fillText("HP    :", 16, 220);
+      const hp = state.hp !== undefined ? state.hp : 100;
+      ctx1.fillStyle = hp > 50 ? "#00ff66" : (hp > 25 ? "#ffee00" : "#ff2244");
+      ctx1.fillText(`${hp}%`, 108, 220);
+
+      // HP 미니 바
+      ctx1.strokeStyle = "#333344";
+      ctx1.strokeRect(12, 234, 232, 10);
+      ctx1.fillStyle = hp > 50 ? "#00ff66" : (hp > 25 ? "#ffee00" : "#ff2244");
+      ctx1.fillRect(14, 236, (hp / 100) * 228, 6);
+
+      // 탄약
+      ctx1.fillStyle = "#ff77aa";
+      ctx1.fillText("AMMO  :", 16, 270);
+      if (state.rld === 1) {
+        ctx1.fillStyle = "#ff2244";
+        ctx1.fillText("RELOAD...", 108, 270);
+      } else {
+        let ammoStr = "";
+        const amo = state.amo !== undefined ? state.amo : 10;
+        for (let i = 0; i < 10; i++) ammoStr += (i < amo ? "v" : ".");
+        ctx1.fillText(ammoStr, 108, 270);
+      }
+
+      // BLE 상태
+      ctx1.fillStyle = "#00ff66";
+      ctx1.fillText("BLE   :", 16, 300);
+      ctx1.fillText("CONNECTED", 108, 300);
+    }
+
+    // -------------------------------------------------------------------------
+    // [TFT 2] 중앙 메인 전장 렌더링
+    // -------------------------------------------------------------------------
+    function renderTFT2() {
+      ctx2.fillStyle = "#000000";
+      ctx2.fillRect(0, 0, 256, 320);
+
+      // 1. 녹색 외곽 테두리 (피격/타격 시 플래시)
+      if (flashBorderTimer > 0) {
+        ctx2.strokeStyle = flashBorderColor;
+        ctx2.lineWidth = 3;
+        flashBorderTimer--;
+      } else {
+        ctx2.strokeStyle = "#00ff66";
+        ctx2.lineWidth = 2;
+      }
+      ctx2.strokeRect(2, 2, 252, 316);
+      ctx2.beginPath(); ctx2.moveTo(2, 44); ctx2.lineTo(254, 44); ctx2.stroke();
+
+      // 상단 헤더
+      ctx2.fillStyle = "#ffffff";
+      ctx2.font = "bold 14px Consolas";
+      ctx2.fillText("HEART SHOOTER", 32, 28);
+
+      // 2. 위험 저지선 (Y = 128 -> 256px)
+      ctx2.strokeStyle = "#780000";
+      ctx2.lineWidth = 1;
+      ctx2.setLineDash([4, 4]);
+      ctx2.beginPath(); ctx2.moveTo(8, 256); ctx2.lineTo(248, 256); ctx2.stroke();
+      ctx2.setLineDash([]);
+
+      // 시작 화면 상태인 경우 (gst == 0) 안내 문구 표시
+      if (state.gst === 0) {
+        ctx2.fillStyle = "#ff0077";
+        ctx2.font = "bold 26px Consolas";
+        ctx2.fillText("HEART", 28, 95);
+
+        ctx2.fillStyle = "#ffee00";
+        ctx2.fillText("SHOOTER", 28, 135);
+
+        ctx2.fillStyle = "#ffffff";
+        ctx2.font = "12px Consolas";
+        ctx2.fillText(">> PULL TRIGGER <<", 24, 210);
+        ctx2.fillText("TO START GAME", 40, 235);
+      } else if (state.gst === 2) {
+        // 스테이지 클리어
+        ctx2.fillStyle = "#ffee00";
+        ctx2.font = "bold 26px Consolas";
+        ctx2.fillText("STAGE CLEAR", 16, 120);
+
+        ctx2.fillStyle = "#00ff66";
+        ctx2.font = "14px Consolas";
+        ctx2.fillText("+30 HP RECOVERED", 36, 180);
+      } else {
+        // 3. 외계인 3마리 렌더링 (STATE_PLAYING)
+        const aliens = state.a || [];
+        for (let i = 0; i < aliens.length; i++) {
+          const aln = aliens[i];
+          if (!aln) continue;
+          const ax = (aln.x / 128) * 256;
+          const ay = (aln.y / 160) * 320;
+          const s = (aln.t === 2 ? 16 : 14);
+
+          if (aln.act === 1) {
+            let col = (aln.t === 0 ? "#00f0ff" : (aln.t === 1 ? "#ff00ff" : "#ffee00"));
+            if (aln.h === 1 && aln.m > 1) col = "#ff2244";
+
+            ctx2.fillStyle = col;
+            if (aln.t === 0) {
+              ctx2.fillRect(ax - s, ay - s, s * 2, s * 2);
+              ctx2.fillStyle = "#ffffff";
+              ctx2.fillRect(ax - 2, ay - 2, 4, 4);
+            } else if (aln.t === 1) {
+              ctx2.beginPath();
+              ctx2.roundRect(ax - s, ay - s, s * 2, s * 2, 4);
+              ctx2.fill();
+              ctx2.strokeStyle = "#000000";
+              ctx2.beginPath(); ctx2.moveTo(ax - s + 4, ay); ctx2.lineTo(ax + s - 4, ay); ctx2.stroke();
+            } else {
+              ctx2.fillRect(ax - s, ay - s, s * 2, s * 2);
+              ctx2.strokeStyle = "#ffffff";
+              ctx2.strokeRect(ax - s + 2, ay - s + 2, (s * 2) - 4, (s * 2) - 4);
+              ctx2.fillStyle = "#ff2244";
+              ctx2.fillRect(ax - 2, ay - 2, 4, 4);
+            }
+
+            // 미니 체력바
+            const hpW = (aln.h * 32) / aln.m;
+            ctx2.fillStyle = "#333333";
+            ctx2.fillRect(ax - 16, ay - s - 8, 32, 4);
+            ctx2.fillStyle = aln.h > 1 ? "#00ff66" : "#ff2244";
+            ctx2.fillRect(ax - 16, ay - s - 8, hpW, 4);
+          } else if (aln.d > 0) {
+            // 💥 6프레임 사망 폭발 애니메이션
+            const step = 7 - aln.d;
+            if (step <= 3) {
+              ctx2.strokeStyle = "#ffee00";
+              ctx2.lineWidth = 2;
+              ctx2.beginPath(); ctx2.arc(ax, ay, step * 8, 0, Math.PI * 2); ctx2.stroke();
+              ctx2.strokeStyle = "#ffffff";
+              ctx2.beginPath(); ctx2.arc(ax, ay, step * 4, 0, Math.PI * 2); ctx2.stroke();
+            } else {
+              const sp = (step - 3) * 8;
+              ctx2.fillStyle = "#ff0077"; ctx2.fillRect(ax - sp, ay - sp, 4, 4);
+              ctx2.fillStyle = "#ffee00"; ctx2.fillRect(ax + sp, ay - sp, 4, 4);
+              ctx2.fillStyle = "#ff2244"; ctx2.fillRect(ax - sp, ay + sp, 4, 4);
+              ctx2.fillStyle = "#ffffff"; ctx2.fillRect(ax + sp, ay + sp, 4, 4);
+            }
+          }
+        }
+      }
+
+      // 4. 타격 이펙트 링
+      if (hitMarkerTimer > 0) {
+        const r = 12 + (5 - hitMarkerTimer) * 6;
+        ctx2.strokeStyle = "#ffee00";
+        ctx2.lineWidth = 2;
+        ctx2.beginPath(); ctx2.arc((hitMarkerX / 128) * 256, (hitMarkerY / 160) * 320, r, 0, Math.PI * 2); ctx2.stroke();
+        hitMarkerTimer--;
+      }
+
+      // 5. 🎯 대형 샷건 에임 레티클 (어떤 화면 상태에서든 항상 렌더링!)
+      const gx = (state.gx / 128) * 256;
+      const gy = (state.gy / 160) * 320;
+      const retR = 28;
+
+      const retCol = state.trg === 1 ? "#ffee00" : (state.prs >= 25 ? "#ff2244" : "#00f0ff");
+      ctx2.strokeStyle = retCol;
+      ctx2.lineWidth = 2;
+      ctx2.beginPath(); ctx2.arc(gx, gy, retR, 0, Math.PI * 2); ctx2.stroke();
+
+      ctx2.beginPath(); ctx2.moveTo(gx - retR - 6, gy); ctx2.lineTo(gx - retR, gy); ctx2.stroke();
+      ctx2.beginPath(); ctx2.moveTo(gx + retR, gy); ctx2.lineTo(gx + retR + 6, gy); ctx2.stroke();
+      ctx2.beginPath(); ctx2.moveTo(gx, gy - retR - 6); ctx2.lineTo(gx, gy - retR); ctx2.stroke();
+      ctx2.beginPath(); ctx2.moveTo(gx, gy + retR); ctx2.lineTo(gx, gy + retR + 6); ctx2.stroke();
+
+      ctx2.fillStyle = "#ffffff";
+      ctx2.fillRect(gx - 2, gy - 2, 4, 4);
+    }
+
+    // -------------------------------------------------------------------------
+    // [TFT 3] 우측 미션 스코어보드 렌더링
+    // -------------------------------------------------------------------------
+    function renderTFT3() {
+      ctx3.fillStyle = "#000000";
+      ctx3.fillRect(0, 0, 256, 320);
+
+      // 시안색 외곽 프레임
+      ctx3.strokeStyle = "#00f0ff";
+      ctx3.lineWidth = 2;
+      ctx3.strokeRect(2, 2, 252, 316);
+      ctx3.beginPath(); ctx3.moveTo(2, 44); ctx3.lineTo(254, 44); ctx3.stroke();
+
+      // 상단 헤더
+      ctx3.fillStyle = "#ffffff";
+      ctx3.font = "bold 14px Consolas";
+      ctx3.fillText("MISSION STATS", 30, 28);
+
+      // STAGE
+      ctx3.fillStyle = "#ffee00";
+      ctx3.font = "12px Consolas";
+      ctx3.fillText("STAGE :", 16, 68);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.stg || 1}`, 120, 68);
+
+      // KILLS
+      ctx3.fillStyle = "#ffee00";
+      ctx3.fillText("KILLS :", 16, 100);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.kl || 0} / ${state.tk || 3}`, 120, 100);
+
+      // 구분선
+      ctx3.strokeStyle = "#333344";
+      ctx3.beginPath(); ctx3.moveTo(12, 124); ctx3.lineTo(244, 124); ctx3.stroke();
+
+      // SCORE
+      ctx3.fillStyle = "#00ff66";
+      ctx3.fillText("SCORE :", 16, 148);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.scr || 0}`, 120, 148);
+
+      // COMBO
+      ctx3.fillStyle = "#ff77aa";
+      ctx3.fillText("COMBO :", 16, 180);
+      ctx3.fillText(`${state.cmb || 0}`, 120, 180);
+
+      // 구분선
+      ctx3.beginPath(); ctx3.moveTo(12, 204); ctx3.lineTo(244, 204); ctx3.stroke();
+
+      // 외계인별 격파수
+      ctx3.fillStyle = "#00f0ff";
+      ctx3.fillText("A (SCOUT)  :", 16, 228);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.ka || 0}`, 160, 228);
+
+      ctx3.fillStyle = "#ff00ff";
+      ctx3.fillText("B (WARRIOR):", 16, 260);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.kb || 0}`, 160, 260);
+
+      ctx3.fillStyle = "#ffee00";
+      ctx3.fillText("C (JUGGER) :", 16, 292);
+      ctx3.fillStyle = "#ffffff";
+      ctx3.fillText(`${state.kc || 0}`, 160, 292);
+    }
+
+    // 렌더링 루프 시작
+    requestAnimationFrame(render3TFTs);
+  </script>
+</body>
+</html>
