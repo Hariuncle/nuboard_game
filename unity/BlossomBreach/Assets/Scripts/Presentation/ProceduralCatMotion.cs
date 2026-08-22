@@ -151,7 +151,7 @@ namespace BlossomBreach
                     ? material.GetColor("_BaseColor")
                     : material.HasProperty("_Color") ? material.GetColor("_Color") : Color.white;
                 var name = renderer.gameObject.name;
-                var purified = name == "Eye" ? new Color(0.08f, 0.05f, 0.10f)
+                var purified = name == "Pupil" ? new Color(0.08f, 0.05f, 0.10f)
                     : name == "Cheek" ? new Color(1f, 0.35f, 0.52f)
                     : Color.Lerp(baseColor, kindnessTint, 0.46f);
                 var block = new MaterialPropertyBlock();
@@ -212,7 +212,9 @@ namespace BlossomBreach
                 if (!importedBone && (child.name.Contains("Tail") || child.name.Contains("Scarf")))
                     tails.Add(new AnimatedPart(child));
                 if (!importedBone && child.name.Contains("Core")) coreParts.Add(new AnimatedScale(child));
-                if (!importedBone && child.name == "Eye") happyEyes.Add(new AnimatedScale(child));
+                if (!importedBone && (child.name == "Eye White" || child.name == "Iris" ||
+                                      child.name == "Pupil" || child.name == "Eye Glint"))
+                    happyEyes.Add(new AnimatedScale(child));
                 if (!importedBone && child.name == "Cheek") cheeks.Add(new AnimatedScale(child));
                 if (child.name == "Rose Shield") shield = child;
             }

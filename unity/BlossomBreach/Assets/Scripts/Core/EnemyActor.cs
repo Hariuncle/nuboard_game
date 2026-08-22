@@ -266,19 +266,33 @@ namespace BlossomBreach
         private void EnsureHitTarget()
         {
             Collider[] colliders = GetComponentsInChildren<Collider>(true);
+            Collider bodyCollider = GetComponent<Collider>();
             if (colliders.Length == 0)
             {
                 CapsuleCollider body = gameObject.AddComponent<CapsuleCollider>();
                 body.center = new Vector3(0f, 0.75f, 0f);
                 body.height = Kind == EnemyKind.Boss ? 2.8f : 1.6f;
                 body.radius = Kind == EnemyKind.Boss ? 0.8f : 0.45f;
-                colliders = new Collider[] { body };
+                bodyCollider = body;
             }
 
-            bool hasZone = GetComponentInChildren<HitZone>(true) != null;
-            if (!hasZone)
+            if (bodyCollider == null)
             {
-                colliders[0].gameObject.AddComponent<HitZone>();
+                return;
+            }
+
+            HitZone bodyZone = bodyCollider.GetComponent<HitZone>();
+            if (bodyZone == null)
+            {
+                bodyZone = bodyCollider.gameObject.AddComponent<HitZone>();
+            }
+
+            if (Kind == EnemyKind.Armored)
+            {
+                // The visible armored silhouette is itself a shield hit proxy. Without
+                // this marker only the small rose collider could break the shield, while
+                // hits on the otherwise valid root capsule were rejected as body shots.
+                bodyZone.shield = true;
             }
         }
 

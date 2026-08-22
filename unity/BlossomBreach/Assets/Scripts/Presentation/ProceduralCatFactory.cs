@@ -23,6 +23,15 @@ namespace BlossomBreach
                 EnemyKind.Boss => new Color(0.25f, 0.16f, 0.28f),
                 _ => Color.gray
             };
+            var accentColor = kind switch
+            {
+                EnemyKind.Scout => new Color(0.32f, 0.66f, 0.26f),
+                EnemyKind.Fast => new Color(0.18f, 0.64f, 0.92f),
+                EnemyKind.Armored => new Color(0.95f, 0.57f, 0.28f),
+                EnemyKind.Bomber => new Color(1f, 0.62f, 0.08f),
+                EnemyKind.Boss => new Color(0.96f, 0.18f, 0.55f),
+                _ => new Color(0.55f, 0.72f, 0.80f)
+            };
 
             var size = kind switch
             {
@@ -30,7 +39,7 @@ namespace BlossomBreach
                 EnemyKind.Boss => 1.22f,
                 _ => 1f
             };
-            BuildCat(rig, bodyColor, size);
+            BuildCat(rig, bodyColor, accentColor, size);
 
             switch (kind)
             {
@@ -73,12 +82,12 @@ namespace BlossomBreach
             return root;
         }
 
-        private static void BuildCat(Transform root, Color fur, float size)
+        private static void BuildCat(Transform root, Color fur, Color accent, float size)
         {
             Part("Body", PrimitiveType.Capsule, root, new Vector3(0f, 0.93f, 0.06f) * size,
-                new Vector3(0.72f, 0.76f, 0.56f) * size, fur);
+                new Vector3(0.68f, 0.78f, 0.55f) * size, fur);
             Part("Head", PrimitiveType.Sphere, root, new Vector3(0f, 1.70f, -0.03f) * size,
-                new Vector3(0.83f, 0.70f, 0.70f) * size, fur);
+                new Vector3(0.91f, 0.78f, 0.75f) * size, fur);
 
             var earInside = Color.Lerp(fur, new Color(1f, 0.48f, 0.53f), 0.55f);
             for (var side = -1; side <= 1; side += 2)
@@ -92,12 +101,22 @@ namespace BlossomBreach
                     new Vector3(0.18f, 0.36f, 0.08f) * size,
                     Quaternion.Euler(0f, 0f, -8f * side), earInside);
 
-                Part("Eye", PrimitiveType.Sphere, root,
-                    new Vector3(0.23f * side, 1.78f, -0.62f) * size,
-                    new Vector3(0.12f, 0.16f, 0.08f) * size, new Color(0.05f, 0.045f, 0.07f));
+                Part("Eye White", PrimitiveType.Sphere, root,
+                    new Vector3(0.24f * side, 1.79f, -0.67f) * size,
+                    new Vector3(0.20f, 0.23f, 0.075f) * size, new Color(1f, 0.97f, 0.89f));
+                Part("Iris", PrimitiveType.Sphere, root,
+                    new Vector3(0.23f * side, 1.78f, -0.73f) * size,
+                    new Vector3(0.125f, 0.165f, 0.045f) * size, Color.Lerp(accent, Color.white, 0.12f), true);
+                Part("Pupil", PrimitiveType.Sphere, root,
+                    new Vector3(0.23f * side, 1.77f, -0.77f) * size,
+                    new Vector3(0.065f, 0.125f, 0.028f) * size, new Color(0.035f, 0.025f, 0.055f));
                 Part("Eye Glint", PrimitiveType.Sphere, root,
-                    new Vector3(0.20f * side, 1.83f, -0.69f) * size,
-                    Vector3.one * (0.038f * size), Color.white, true);
+                    new Vector3(0.19f * side, 1.86f, -0.80f) * size,
+                    Vector3.one * (0.042f * size), Color.white, true);
+                Part("Eyebrow", PrimitiveType.Capsule, root,
+                    new Vector3(0.23f * side, 2.03f, -0.69f) * size,
+                    new Vector3(0.026f, 0.17f, 0.025f) * size, Color.Lerp(fur, Color.black, 0.58f), false,
+                    Quaternion.Euler(0f, 0f, 84f + side * 7f));
                 Part("Muzzle", PrimitiveType.Sphere, root,
                     new Vector3(0.16f * side, 1.53f, -0.63f) * size,
                     new Vector3(0.28f, 0.19f, 0.14f) * size, new Color(1f, 0.86f, 0.67f));
@@ -107,6 +126,12 @@ namespace BlossomBreach
                 Part("Paw", PrimitiveType.Capsule, root,
                     new Vector3(0.32f * side, 0.26f, -0.25f) * size,
                     new Vector3(0.25f, 0.28f, 0.29f) * size, Color.Lerp(fur, Color.white, 0.25f));
+                for (var toe = -1; toe <= 1; toe++)
+                {
+                    Part("Toe Bean", PrimitiveType.Sphere, root,
+                        new Vector3((0.32f * side) + toe * 0.065f, 0.22f, -0.50f) * size,
+                        new Vector3(0.052f, 0.038f, 0.028f) * size, new Color(0.67f, 0.25f, 0.34f));
+                }
 
                 for (var whisker = -1; whisker <= 1; whisker += 2)
                 {
@@ -119,11 +144,21 @@ namespace BlossomBreach
 
             Part("Nose", PrimitiveType.Sphere, root, new Vector3(0f, 1.58f, -0.76f) * size,
                 new Vector3(0.13f, 0.09f, 0.08f) * size, new Color(0.66f, 0.20f, 0.31f));
+            for (var side = -1; side <= 1; side += 2)
+            {
+                Part("Smile", PrimitiveType.Capsule, root, new Vector3(0.075f * side, 1.45f, -0.76f) * size,
+                    new Vector3(0.018f, 0.10f, 0.018f) * size, new Color(0.30f, 0.10f, 0.15f), false,
+                    Quaternion.Euler(0f, 0f, 42f * side));
+            }
+            MeshPart("Chest Tuft", ProceduralGeometry.Cone, root, new Vector3(0f, 1.10f, -0.54f) * size,
+                new Vector3(0.34f, 0.42f, 0.12f) * size, Quaternion.Euler(180f, 0f, 0f),
+                Color.Lerp(fur, Color.white, 0.48f));
 
             Part("Tail Lower", PrimitiveType.Capsule, root, new Vector3(0.58f, 0.88f, 0.36f) * size,
                 new Vector3(0.18f, 0.56f, 0.18f) * size, fur, false, Quaternion.Euler(8f, 0f, -48f));
             Part("Tail Tip", PrimitiveType.Capsule, root, new Vector3(0.91f, 1.29f, 0.38f) * size,
-                new Vector3(0.16f, 0.43f, 0.16f) * size, fur, false, Quaternion.Euler(0f, 0f, -28f));
+                new Vector3(0.16f, 0.43f, 0.16f) * size, Color.Lerp(fur, accent, 0.42f), false,
+                Quaternion.Euler(0f, 0f, -28f));
         }
 
         private static void AddLeafHood(Transform root)
@@ -141,6 +176,8 @@ namespace BlossomBreach
                     new Vector3(0.22f, 0.47f, 0.15f), Quaternion.Euler(0f, 0f, -18f * i),
                     Color.Lerp(leaf, new Color(0.53f, 0.82f, 0.26f), i == 0 ? 0.55f : 0.2f));
             }
+            Part("Hood Heart Clasp", PrimitiveType.Sphere, root, new Vector3(0f, 1.26f, -0.61f),
+                new Vector3(0.18f, 0.18f, 0.09f), new Color(0.82f, 0.95f, 0.30f), true);
         }
 
         private static void AddLeafArmor(Transform root)
@@ -154,6 +191,14 @@ namespace BlossomBreach
                 MeshPart("Armor Leaf", ProceduralGeometry.Cone, root,
                     new Vector3(0.56f * side, 1.48f, -0.10f), new Vector3(0.24f, 0.45f, 0.18f),
                     Quaternion.Euler(0f, 0f, -35f * side), armor);
+            }
+            Part("Armor Brow", PrimitiveType.Capsule, root, new Vector3(0f, 2.12f, -0.52f),
+                new Vector3(0.09f, 0.55f, 0.08f), new Color(0.73f, 0.80f, 0.82f), true,
+                Quaternion.Euler(0f, 0f, 90f));
+            for (var side = -1; side <= 1; side += 2)
+            {
+                Part("Armor Rivet", PrimitiveType.Sphere, root, new Vector3(0.47f * side, 2.12f, -0.57f),
+                    Vector3.one * 0.10f, new Color(1f, 0.70f, 0.30f), true);
             }
         }
 
@@ -170,6 +215,9 @@ namespace BlossomBreach
                     new Vector3(0.53f * side, 1.02f, 0.18f), new Vector3(0.32f, 0.58f, 0.16f),
                     Quaternion.Euler(12f, 0f, 55f * side), new Color(0.62f, 0.94f, 0.88f), true);
             }
+            MeshPart("Wind Crest", ProceduralGeometry.Cone, root, new Vector3(0f, 2.42f, -0.18f),
+                new Vector3(0.20f, 0.52f, 0.15f), Quaternion.Euler(0f, 0f, -24f),
+                new Color(0.32f, 0.86f, 1f), true);
         }
 
         private static void AddBomberAccessories(Transform root)
@@ -189,6 +237,15 @@ namespace BlossomBreach
                 MeshPart("Warning Ear Flag", ProceduralGeometry.Cone, root,
                     new Vector3(0.37f * side, 2.35f, -0.10f), new Vector3(0.15f, 0.34f, 0.12f),
                     Quaternion.Euler(0f, 0f, -12f * side), new Color(1f, 0.70f, 0.06f), true);
+            }
+            Part("Warning Belt", PrimitiveType.Capsule, root, new Vector3(0f, 0.88f, -0.48f),
+                new Vector3(0.10f, 0.52f, 0.08f), new Color(0.16f, 0.13f, 0.18f), false,
+                Quaternion.Euler(0f, 0f, 90f));
+            for (var stripe = -1; stripe <= 1; stripe += 2)
+            {
+                Part("Warning Stripe", PrimitiveType.Capsule, root,
+                    new Vector3(0.18f * stripe, 0.88f, -0.55f), new Vector3(0.035f, 0.12f, 0.025f),
+                    new Color(1f, 0.72f, 0.08f), true, Quaternion.Euler(0f, 0f, 38f));
             }
         }
 
@@ -228,6 +285,8 @@ namespace BlossomBreach
                     new Vector3(0.13f, 0.38f, 0.13f), Quaternion.Euler(0f, 0f, Mathf.Cos(angle) * 15f),
                     new Color(0.37f, 0.60f, 0.22f));
             }
+            Part("Crown Heart", PrimitiveType.Sphere, root, new Vector3(0f, 2.73f, -0.42f),
+                new Vector3(0.22f, 0.25f, 0.12f), new Color(1f, 0.16f, 0.52f), true);
         }
 
         private static void AddBossMantle(Transform root)
@@ -327,8 +386,9 @@ namespace BlossomBreach
             };
             if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
             if (material.HasProperty("_Color")) material.SetColor("_Color", color);
-            if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", emissive ? 0.70f : 0.36f);
+            if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", emissive ? 0.78f : 0.46f);
             if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", 0.02f);
+            if (material.HasProperty("_CoatMask")) material.SetFloat("_CoatMask", emissive ? 0.18f : 0.08f);
             if (emissive && material.HasProperty("_EmissionColor"))
             {
                 material.EnableKeyword("_EMISSION");

@@ -22,9 +22,9 @@ namespace BlossomBreach
         [SerializeField, Min(1f)] private float introPrepareTimeout = 8f;
 
         private bool skipIntro;
-        private bool introFinished;
         private bool introFailed;
         private bool gateAccepted;
+        private static Font uiFont;
 
         private IEnumerator Start()
         {
@@ -40,13 +40,13 @@ namespace BlossomBreach
 
             PrepareWorld();
             yield return ShowGate(
-                "BLOSSOM BREACH",
-                "A LIGHT-GUN GARDEN DEFENSE\n\nMOVE TO AIM  //  LEFT TRIGGER TO CLEANSE",
-                "ENTER THE MEADOW");
+                "블로섬 브리치",
+                "건슈팅 정원 방어전\n\n조준기로 겨누고  //  방아쇠로 정화하세요",
+                "초원으로 진입");
             yield return ShowGate(
-                "CHAPTER 01  //  CLOVER FIELD",
-                "MISSION\nPurify the approaching nightmare spores.\nBuild your chain and protect the meadow's purity.",
-                "BEGIN MISSION");
+                "제1장  //  클로버 들판",
+                "임무\n다가오는 악몽 포자를 정화하세요.\n연속 정화를 이어가며 초원의 순수도를 지키세요.",
+                "임무 시작");
             CreateGameplay();
         }
 
@@ -68,6 +68,7 @@ namespace BlossomBreach
 
             EnsureEventSystem();
             GameObject introRoot = new GameObject("Meadow Intro", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            Stretch(introRoot.GetComponent<RectTransform>(), Vector2.zero, Vector2.one);
             Canvas introCanvas = introRoot.GetComponent<Canvas>();
             introCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             introCanvas.sortingOrder = 1000;
@@ -88,23 +89,29 @@ namespace BlossomBreach
             player.playOnAwake = false;
             player.waitForFirstFrame = true;
             player.skipOnDrop = true;
-            player.isLooping = false;
+            player.isLooping = true;
             player.source = VideoSource.Url;
             player.url = videoPath;
             player.renderMode = VideoRenderMode.RenderTexture;
             player.targetTexture = target;
-            player.audioOutputMode = VideoAudioOutputMode.Direct;
-            player.loopPointReached += _ => introFinished = true;
+            player.audioOutputMode = VideoAudioOutputMode.AudioSource;
+            player.controlledAudioTrackCount = 1;
+
+            AudioSource introAudio = introRoot.AddComponent<AudioSource>();
+            introAudio.playOnAwake = false;
+            introAudio.loop = false;
+            introAudio.spatialBlend = 0f;
+            introAudio.volume = 1f;
+
             player.errorReceived += (_, message) =>
             {
                 introFailed = true;
-                Debug.LogWarning($"Opening movie could not be played: {message}");
+                Debug.LogWarning($"인트로 영상을 재생하지 못했습니다. 게임을 바로 시작합니다: {message}");
             };
 
-            BuildSkipButton(introRoot.transform);
+            BuildIntroSkipPrompt(introRoot.transform);
             RectTransform menuReticle = BuildMenuReticle(introRoot.transform);
             skipIntro = false;
-            introFinished = false;
             introFailed = false;
             player.Prepare();
 
@@ -112,20 +119,40 @@ namespace BlossomBreach
             while (!skipIntro && !introFailed && !player.isPrepared && Time.realtimeSinceStartup < timeoutAt)
             {
                 UpdateMenuReticle(menuReticle);
+                if (WasIntroSkipPressed())
+                {
+                    skipIntro = true;
+                }
                 yield return null;
             }
 
             if (!skipIntro && !introFailed && player.isPrepared)
             {
+                if (player.audioTrackCount > 0)
+                {
+                    player.EnableAudioTrack(0, true);
+                    player.SetTargetAudioSource(0, introAudio);
+                }
+
                 player.Play();
-                while (!skipIntro && !introFinished && !introFailed)
+                while (!skipIntro && !introFailed)
                 {
                     UpdateMenuReticle(menuReticle);
+                    if (WasIntroSkipPressed())
+                    {
+                        skipIntro = true;
+                    }
                     yield return null;
                 }
             }
+            else if (!skipIntro && !introFailed)
+            {
+                introFailed = true;
+                Debug.LogWarning("인트로 영상 준비 시간이 초과되어 게임을 바로 시작합니다.");
+            }
 
             player.Stop();
+            introAudio.Stop();
             player.targetTexture = null;
             screen.texture = null;
             target.Release();
@@ -169,6 +196,7 @@ namespace BlossomBreach
             gateAccepted = false;
 
             GameObject gate = new GameObject("Flow Gate", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            Stretch(gate.GetComponent<RectTransform>(), Vector2.zero, Vector2.one);
             Canvas gateCanvas = gate.GetComponent<Canvas>();
             gateCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             gateCanvas.sortingOrder = 900;
@@ -177,7 +205,7 @@ namespace BlossomBreach
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.matchWidthOrHeight = 0.5f;
 
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            Font font = GetUiFont();
             Image veil = CreateImage("Veil", gate.transform, new Color(0.015f, 0.055f, 0.055f, 0.78f));
             Stretch(veil.rectTransform, Vector2.zero, Vector2.one);
 
@@ -233,6 +261,7 @@ namespace BlossomBreach
             camera.nearClipPlane = 0.08f;
             camera.farClipPlane = 180f;
             camera.clearFlags = CameraClearFlags.Skybox;
+            camera.rect = new Rect(0f, 0f, 1f, 1f);
             camera.allowHDR = false;
             camera.allowMSAA = true;
 
@@ -278,16 +307,16 @@ namespace BlossomBreach
             return light;
         }
 
-        private void BuildSkipButton(Transform parent)
+        private void BuildIntroSkipPrompt(Transform parent)
         {
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            GameObject buttonObject = new GameObject("Skip Intro", typeof(RectTransform), typeof(Image), typeof(Button));
+            Font font = GetUiFont();
+            GameObject buttonObject = new GameObject("인트로 건너뛰기", typeof(RectTransform), typeof(Image), typeof(Button));
             RectTransform rect = buttonObject.GetComponent<RectTransform>();
             rect.SetParent(parent, false);
-            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0f);
-            rect.pivot = new Vector2(1f, 0f);
-            rect.anchoredPosition = new Vector2(-42f, 42f);
-            rect.sizeDelta = new Vector2(240f, 76f);
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.anchoredPosition = new Vector2(0f, 54f);
+            rect.sizeDelta = new Vector2(620f, 104f);
             Image image = buttonObject.GetComponent<Image>();
             image.color = new Color(0.03f, 0.10f, 0.11f, 0.88f);
 
@@ -304,17 +333,44 @@ namespace BlossomBreach
             labelRect.offsetMax = Vector2.zero;
             Text label = labelObject.GetComponent<Text>();
             label.font = font;
-            label.fontSize = 21;
+            label.fontSize = 24;
             label.fontStyle = FontStyle.Bold;
             label.alignment = TextAnchor.MiddleCenter;
             label.color = new Color32(255, 251, 222, 255);
             label.raycastTarget = false;
-            label.text = "SKIP  »";
+            label.text = "방아쇠를 당기면 인트로 건너뛰기  /  게임 시작";
+        }
+
+        private static bool WasIntroSkipPressed()
+        {
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                return true;
+            }
+
+            return Touchscreen.current != null &&
+                   Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+        }
+
+        private static Font GetUiFont()
+        {
+            if (uiFont == null)
+            {
+                uiFont = Font.CreateDynamicFontFromOSFont(
+                    new[] { "Malgun Gothic", "맑은 고딕", "Arial" },
+                    32);
+                if (uiFont == null)
+                {
+                    uiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                }
+            }
+
+            return uiFont;
         }
 
         private static RawImage CreateFullscreenRawImage(Transform parent)
         {
-            GameObject screenObject = new GameObject("Video", typeof(RectTransform), typeof(RawImage));
+            GameObject screenObject = new GameObject("Video", typeof(RectTransform), typeof(RawImage), typeof(AspectRatioFitter));
             RectTransform rect = screenObject.GetComponent<RectTransform>();
             rect.SetParent(parent, false);
             rect.anchorMin = Vector2.zero;
@@ -324,6 +380,9 @@ namespace BlossomBreach
             RawImage image = screenObject.GetComponent<RawImage>();
             image.color = Color.white;
             image.raycastTarget = false;
+            AspectRatioFitter fitter = screenObject.GetComponent<AspectRatioFitter>();
+            fitter.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+            fitter.aspectRatio = 16f / 9f;
             return image;
         }
 

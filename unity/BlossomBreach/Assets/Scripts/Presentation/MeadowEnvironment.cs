@@ -37,6 +37,9 @@ namespace BlossomBreach
             BuildFlowerClusters(generated);
             BuildGardenArch(generated);
             BuildBoundaryShrubs(generated);
+            BuildForegroundDetails(generated);
+            BuildTreeLayers(generated);
+            BuildDistantSky(generated);
             ConfigureAtmosphere();
         }
 
@@ -45,6 +48,12 @@ namespace BlossomBreach
             ProceduralCatFactory.Part("Meadow Ground", PrimitiveType.Cube, parent,
                 new Vector3(0f, -0.28f, 8f), new Vector3(22f, 0.45f, 34f),
                 new Color(0.36f, 0.67f, 0.27f), false, Quaternion.identity, true);
+            ProceduralCatFactory.Part("Mid Meadow Tone", PrimitiveType.Cube, parent,
+                new Vector3(0f, -0.045f, 11f), new Vector3(21.8f, 0.018f, 11f),
+                new Color(0.30f, 0.59f, 0.29f));
+            ProceduralCatFactory.Part("Far Meadow Tone", PrimitiveType.Cube, parent,
+                new Vector3(0f, -0.042f, 22f), new Vector3(21.8f, 0.016f, 11f),
+                new Color(0.25f, 0.49f, 0.31f));
             ProceduralCatFactory.Part("Soft Path", PrimitiveType.Cube, parent,
                 new Vector3(0f, -0.045f, 7f), new Vector3(4.5f, 0.025f, 28f),
                 new Color(0.78f, 0.69f, 0.47f));
@@ -178,12 +187,128 @@ namespace BlossomBreach
             }
         }
 
+        private static void BuildForegroundDetails(Transform parent)
+        {
+            var rockColors = new[]
+            {
+                new Color(0.43f, 0.46f, 0.48f), new Color(0.55f, 0.50f, 0.48f),
+                new Color(0.38f, 0.43f, 0.39f)
+            };
+            for (var side = -1; side <= 1; side += 2)
+            {
+                for (var i = 0; i < 7; i++)
+                {
+                    var z = -5.5f + i * 1.55f;
+                    var x = side * (4.2f + (i % 3) * 0.72f);
+                    ProceduralCatFactory.Part("Foreground Rock", PrimitiveType.Sphere, parent,
+                        new Vector3(x, 0.12f, z), new Vector3(0.62f, 0.34f, 0.48f),
+                        rockColors[i % rockColors.Length], false, Quaternion.Euler(0f, i * 31f, side * 8f));
+                    for (var blade = 0; blade < 2; blade++)
+                    {
+                        ProceduralCatFactory.MeshPart("Grass Blade", ProceduralGeometry.Cone, parent,
+                            new Vector3(x + side * (0.42f + blade * 0.16f), 0.30f, z + blade * 0.18f),
+                            new Vector3(0.12f, 0.64f + blade * 0.14f, 0.10f),
+                            Quaternion.Euler(0f, 0f, side * (8f + blade * 9f)),
+                            blade == 0 ? new Color(0.30f, 0.68f, 0.28f) : new Color(0.48f, 0.76f, 0.25f));
+                    }
+                }
+            }
+        }
+
+        private static void BuildTreeLayers(Transform parent)
+        {
+            for (var side = -1; side <= 1; side += 2)
+            {
+                for (var i = 0; i < 5; i++)
+                {
+                    var z = 3.5f + i * 5.7f;
+                    var x = side * (8.1f + (i % 2) * 1.45f);
+                    var scale = 0.82f + i * 0.07f;
+                    BuildTree(parent, new Vector3(x, 0f, z), scale,
+                        Color.Lerp(new Color(0.15f, 0.38f, 0.25f), new Color(0.29f, 0.52f, 0.32f), i / 5f));
+                }
+            }
+        }
+
+        private static void BuildTree(Transform parent, Vector3 position, float scale, Color canopy)
+        {
+            ProceduralCatFactory.Part("Tree Trunk", PrimitiveType.Cylinder, parent,
+                position + Vector3.up * (1.65f * scale), new Vector3(0.42f, 1.65f, 0.42f) * scale,
+                new Color(0.31f, 0.20f, 0.16f));
+            for (var i = 0; i < 4; i++)
+            {
+                var angle = i * Mathf.PI * 0.5f;
+                ProceduralCatFactory.Part("Tree Canopy", PrimitiveType.Sphere, parent,
+                    position + new Vector3(Mathf.Cos(angle) * 0.72f, 3.25f + (i % 2) * 0.48f,
+                        Mathf.Sin(angle) * 0.55f) * scale,
+                    new Vector3(1.65f, 1.28f, 1.30f) * scale,
+                    Color.Lerp(canopy, new Color(0.48f, 0.68f, 0.32f), i * 0.08f));
+            }
+        }
+
+        private static void BuildDistantSky(Transform parent)
+        {
+            var upperSky = ProceduralCatFactory.Part("Upper Sky", PrimitiveType.Cube, parent,
+                new Vector3(0f, 19f, 50f), new Vector3(54f, 22f, 0.8f),
+                new Color(0.24f, 0.22f, 0.46f));
+            var lowerSky = ProceduralCatFactory.Part("Lower Sky", PrimitiveType.Cube, parent,
+                new Vector3(0f, 7.2f, 48.8f), new Vector3(54f, 8f, 0.9f),
+                new Color(0.48f, 0.49f, 0.68f));
+            DisableBackdropShadows(upperSky);
+            DisableBackdropShadows(lowerSky);
+
+            var hillColors = new[]
+            {
+                new Color(0.20f, 0.30f, 0.34f), new Color(0.24f, 0.38f, 0.34f),
+                new Color(0.29f, 0.43f, 0.32f)
+            };
+            for (var i = 0; i < 7; i++)
+            {
+                ProceduralCatFactory.Part("Distant Hill", PrimitiveType.Sphere, parent,
+                    new Vector3(-18f + i * 6f, 1.5f + (i % 2) * 0.8f, 42f - (i % 3)),
+                    new Vector3(8.8f, 4.8f + (i % 2), 3.2f), hillColors[i % hillColors.Length]);
+            }
+
+            ProceduralCatFactory.Part("Kindness Sun", PrimitiveType.Sphere, parent,
+                new Vector3(-10f, 13.2f, 45f), Vector3.one * 3.2f,
+                new Color(1f, 0.68f, 0.31f), true);
+            var cloud = new Color(0.78f, 0.76f, 0.88f);
+            for (var side = -1; side <= 1; side += 2)
+            {
+                for (var i = 0; i < 4; i++)
+                {
+                    ProceduralCatFactory.Part("Distant Cloud", PrimitiveType.Sphere, parent,
+                        new Vector3(side * (7f + i * 1.25f), 10.4f + (i % 2) * 0.55f, 44f),
+                        new Vector3(2.4f, 0.72f, 0.65f), Color.Lerp(cloud, Color.white, i * 0.05f), true);
+                }
+            }
+
+            // High side canopies frame the HUD without placing geometry in the camera/UI layer.
+            for (var side = -1; side <= 1; side += 2)
+            {
+                for (var i = 0; i < 5; i++)
+                {
+                    ProceduralCatFactory.Part("High Canopy", PrimitiveType.Sphere, parent,
+                        new Vector3(side * (10.5f + i * 0.75f), 8.5f + i * 1.45f, 22f + i),
+                        new Vector3(3.1f, 2.1f, 2.2f),
+                        Color.Lerp(new Color(0.12f, 0.30f, 0.25f), new Color(0.32f, 0.48f, 0.31f), i * 0.10f));
+                }
+            }
+        }
+
+        private static void DisableBackdropShadows(GameObject backdrop)
+        {
+            var renderer = backdrop.GetComponent<Renderer>();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
+
         private static void ConfigureAtmosphere()
         {
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = 0.009f;
-            RenderSettings.fogColor = new Color(0.38f, 0.32f, 0.52f);
+            RenderSettings.fogDensity = 0.0075f;
+            RenderSettings.fogColor = new Color(0.43f, 0.40f, 0.58f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
             RenderSettings.ambientSkyColor = new Color(0.38f, 0.34f, 0.60f);
             RenderSettings.ambientEquatorColor = new Color(0.43f, 0.48f, 0.38f);

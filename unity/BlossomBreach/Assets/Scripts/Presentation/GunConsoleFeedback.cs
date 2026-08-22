@@ -23,8 +23,8 @@ namespace BlossomBreach
         [SerializeField, Range(0f, 1f)] private float screenFlash = 0.65f;
 
         [Header("Audio")]
-        [SerializeField, Range(0f, 1f)] private float shotVolume = 0.34f;
-        [SerializeField, Range(0f, 1f)] private float impactVolume = 0.26f;
+        [SerializeField, Range(0f, 1f)] private float shotVolume = 0.56f;
+        [SerializeField, Range(0f, 1f)] private float impactVolume = 0.52f;
 
         private readonly Image[] _bloomMarks = new Image[4];
         private BlossomGame _game;
@@ -53,7 +53,9 @@ namespace BlossomBreach
         private AudioClip _criticalClip;
         private AudioClip _blockedClip;
         private AudioClip _missClip;
+        private AudioClip _shieldBreakClip;
         private AudioClip _defeatClip;
+        private AudioClip _heartCompleteClip;
 
         public void Configure(BlossomGame game, Camera gameplayCamera)
         {
@@ -61,6 +63,7 @@ namespace BlossomBreach
             ResetCamera();
             _game = game;
             _camera = gameplayCamera != null ? gameplayCamera : Camera.main;
+            EnsureAudioListener();
             CaptureCameraBase();
             Subscribe();
         }
@@ -115,7 +118,7 @@ namespace BlossomBreach
                 case BlossomGame.ShotOutcome.ShieldBreak:
                     color = Amber;
                     strength = 1.12f;
-                    impactClip = _criticalClip;
+                    impactClip = _shieldBreakClip;
                     break;
                 case BlossomGame.ShotOutcome.Critical:
                     color = signal.HasEnemy && signal.EnemyKind == EnemyKind.Boss ? Rose : Mint;
@@ -125,7 +128,9 @@ namespace BlossomBreach
                 case BlossomGame.ShotOutcome.Defeat:
                     color = signal.HasEnemy && signal.EnemyKind == EnemyKind.Boss ? Violet : Rose;
                     strength = 1.20f;
-                    impactClip = _defeatClip;
+                    impactClip = signal.HasEnemy && signal.EnemyKind == EnemyKind.Boss
+                        ? _heartCompleteClip
+                        : _defeatClip;
                     break;
                 default:
                     color = signal.HasEnemy && signal.EnemyKind == EnemyKind.Armored ? Amber : Cream;
@@ -157,8 +162,31 @@ namespace BlossomBreach
 
             if (_impactSource != null && impactClip != null)
             {
-                _impactSource.pitch = signal.Outcome == BlossomGame.ShotOutcome.BossCoreBlocked ? 0.78f : 1f;
-                _impactSource.PlayOneShot(impactClip, impactVolume);
+                float impactPitch = 1f;
+                float outcomeVolume = impactVolume;
+                switch (signal.Outcome)
+                {
+                    case BlossomGame.ShotOutcome.Miss:
+                        impactPitch = 0.84f;
+                        outcomeVolume *= 0.72f;
+                        break;
+                    case BlossomGame.ShotOutcome.BossCoreBlocked:
+                        impactPitch = 0.74f;
+                        outcomeVolume *= 1.08f;
+                        break;
+                    case BlossomGame.ShotOutcome.ShieldBreak:
+                        impactPitch = 0.92f;
+                        outcomeVolume *= 1.18f;
+                        break;
+                    case BlossomGame.ShotOutcome.Defeat:
+                        outcomeVolume *= signal.HasEnemy && signal.EnemyKind == EnemyKind.Boss
+                            ? 1.25f
+                            : 1.08f;
+                        break;
+                }
+
+                _impactSource.pitch = impactPitch;
+                _impactSource.PlayOneShot(impactClip, Mathf.Clamp01(outcomeVolume));
             }
         }
 
@@ -262,11 +290,17 @@ namespace BlossomBreach
             _shotSource.playOnAwake = false;
             _shotSource.spatialBlend = 0f;
             _shotSource.dopplerLevel = 0f;
+            _shotSource.mute = false;
+            _shotSource.volume = 1f;
+            _shotSource.priority = 32;
 
             _impactSource = gameObject.AddComponent<AudioSource>();
             _impactSource.playOnAwake = false;
             _impactSource.spatialBlend = 0f;
             _impactSource.dopplerLevel = 0f;
+            _impactSource.mute = false;
+            _impactSource.volume = 1f;
+            _impactSource.priority = 24;
 
             _shotClip = CreateTone("Gun Pulse", 92f, 58f, 0.065f, 0.62f, 0.26f);
             _powerClip = CreateTone("Overdrive Pulse", 72f, 42f, 0.105f, 0.78f, 0.34f);
@@ -274,7 +308,19 @@ namespace BlossomBreach
             _criticalClip = CreateTone("Critical Hit", 620f, 980f, 0.085f, 0.42f, 0.01f);
             _blockedClip = CreateTone("Armor Block", 245f, 180f, 0.070f, 0.38f, 0.18f);
             _missClip = CreateTone("Dry Miss", 150f, 105f, 0.030f, 0.20f, 0.08f);
+            _shieldBreakClip = CreateTone("Armor Shatter", 210f, 560f, 0.115f, 0.58f, 0.34f);
             _defeatClip = CreateTone("Enemy Cleanse", 380f, 760f, 0.120f, 0.44f, 0.02f);
+            _heartCompleteClip = CreateTone("Heart Purification Complete", 390f, 1320f, 0.240f, 0.62f, 0.01f);
+        }
+
+        private void EnsureAudioListener()
+        {
+            if (FindAnyObjectByType<AudioListener>() != null || _camera == null)
+            {
+                return;
+            }
+
+            _camera.gameObject.AddComponent<AudioListener>();
         }
 
         private static AudioClip CreateTone(

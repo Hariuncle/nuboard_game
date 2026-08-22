@@ -137,7 +137,7 @@ namespace BlossomBreach
                 return;
             }
 
-            threatText.text = string.IsNullOrWhiteSpace(message) ? "FRIEND NEEDS HELP" : message.ToUpperInvariant();
+            threatText.text = string.IsNullOrWhiteSpace(message) ? "친구가 위험해요" : message;
             threatUntil = Time.unscaledTime + Mathf.Max(0.1f, seconds);
             threatText.gameObject.SetActive(true);
         }
@@ -160,7 +160,7 @@ namespace BlossomBreach
             }
 
             bossPanel.gameObject.SetActive(true);
-            bossNameText.text = string.IsNullOrWhiteSpace(displayName) ? "CORRUPTED BLOOM" : displayName.ToUpperInvariant();
+            bossNameText.text = string.IsNullOrWhiteSpace(displayName) ? "타락한 거대 꽃" : displayName;
             bossFill.fillAmount = Mathf.Clamp01(normalizedHealth);
             bossFill.rectTransform.anchorMax = new Vector2(bossFill.fillAmount, 1f);
             bossFill.rectTransform.offsetMax = Vector2.zero;
@@ -211,25 +211,25 @@ namespace BlossomBreach
             }
 
             float purityPercent = game.Purity <= 1.001f ? game.Purity * 100f : game.Purity;
-            scoreText.text = game.Score.ToString("000000");
-            comboText.text = $"CHAIN  ×{Mathf.Max(1, game.Combo)}";
-            purityText.text = $"CORE INTEGRITY  {Mathf.Clamp(purityPercent, 0f, 100f):0}%";
+            scoreText.text = $"점수  {game.Score:000000}";
+            comboText.text = $"연속 정화  ×{Mathf.Max(1, game.Combo)}";
+            purityText.text = $"지구 보호도  {Mathf.Clamp(purityPercent, 0f, 100f):0}%";
             purityFill.fillAmount = Mathf.Clamp01(purityPercent / 100f);
             purityFill.rectTransform.anchorMax = new Vector2(purityFill.fillAmount, 1f);
             purityFill.rectTransform.offsetMax = Vector2.zero;
             timeText.text = FormatTime(game.TimeRemaining);
-            chapterText.text = $"WAVE {game.Chapter:00}  //  CLOVER MEADOW";
+            chapterText.text = $"제{game.Chapter:00}차 공세  //  클로버 초원";
             objectiveText.text = game.Chapter >= 3
-                ? "OBJECTIVE  //  RESTORE THE CORRUPTED BLOOM"
-                : "OBJECTIVE  //  RETURN SPORES TO GENTLE PETS";
+                ? "목표  //  타락한 거대 꽃을 정화하세요"
+                : "목표  //  악몽 포자를 순한 친구로 되돌리세요";
             overdriveText.text = game.OverdriveShots > 0
-                ? $"HEARTBURST  ×{game.OverdriveShots}"
-                : "HEARTBURST  CHARGING";
+                ? $"하트버스트  ×{game.OverdriveShots}"
+                : "하트버스트 충전 중";
             overdriveText.color = game.OverdriveShots > 0 ? Cream : new Color(Mint.r, Mint.g, Mint.b, 0.62f);
             SetReticleViewport(game.AimViewport);
             if (game.BossActive)
             {
-                SetBoss("CORRUPTED BLOOM", game.BossHealthNormalized);
+                SetBoss("타락한 거대 꽃", game.BossHealthNormalized);
             }
             else
             {
@@ -238,12 +238,12 @@ namespace BlossomBreach
 
             if (previousOverdrive >= 0 && game.OverdriveShots > previousOverdrive)
             {
-                ShowThreat("HEARTBURST READY", 1.1f);
+                ShowThreat("하트버스트 준비 완료", 1.1f);
             }
 
             if (previousPurity >= 0f && purityPercent < previousPurity - 5f)
             {
-                ShowThreat("MEADOW NEEDS HELP", 0.8f);
+                ShowThreat("초원이 위험해요", 0.8f);
             }
 
             previousOverdrive = game.OverdriveShots;
@@ -259,8 +259,8 @@ namespace BlossomBreach
             }
             else if (roundWasRunning && resultPanel != null)
             {
-                string resultHeading = game.Purity > 0 ? "EARTH PROTECTED" : "MEADOW NEEDS HELP";
-                resultText.text = $"{resultHeading}\n\nSCORE  {game.Score:000000}\nMAX CHAIN  ×{Mathf.Max(1, game.Combo)}\nCORE  {Mathf.Clamp(purityPercent, 0f, 100f):0}%";
+                string resultHeading = game.Purity > 0 ? "초원을 지켜냈습니다" : "초원이 무너졌습니다";
+                resultText.text = $"{resultHeading}\n\n점수  {game.Score:000000}\n최대 연속 정화  ×{Mathf.Max(1, game.Combo)}\n지구 보호도  {Mathf.Clamp(purityPercent, 0f, 100f):0}%";
                 resultPanel.gameObject.SetActive(true);
             }
         }
@@ -273,11 +273,18 @@ namespace BlossomBreach
 
         private void BuildHud()
         {
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            font = Font.CreateDynamicFontFromOSFont(
+                new[] { "Malgun Gothic", "맑은 고딕", "Arial" },
+                32);
+            if (font == null)
+            {
+                font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            }
             EnsureEventSystem();
 
             GameObject canvasObject = new GameObject("Game HUD", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasObject.transform.SetParent(transform, false);
+            Stretch(canvasObject.GetComponent<RectTransform>(), Vector2.zero, Vector2.one);
             canvas = canvasObject.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 50;
@@ -391,7 +398,7 @@ namespace BlossomBreach
 
             Text label = CreateText("Label", buttonRect, 20, Cream, TextAnchor.MiddleCenter, FontStyle.Bold);
             Stretch(label.rectTransform, Vector2.zero, Vector2.one);
-            label.text = "RESTART";
+            label.text = "다시 시작";
         }
 
         private void BuildResultPanel(Transform parent)
@@ -400,7 +407,7 @@ namespace BlossomBreach
             Stretch(resultPanel, new Vector2(0.29f, 0.22f), new Vector2(0.71f, 0.78f));
 
             Text heading = CreateText("Heading", resultPanel, 34, Mint, TextAnchor.MiddleCenter, FontStyle.Bold);
-            heading.text = "RESCUE REPORT";
+            heading.text = "정화 작전 결과";
             Anchor(heading.rectTransform, new Vector2(0.08f, 0.78f), new Vector2(0.92f, 0.96f));
 
             resultText = CreateText("Result", resultPanel, 27, Cream, TextAnchor.MiddleCenter, FontStyle.Bold);
@@ -419,7 +426,7 @@ namespace BlossomBreach
                 game?.Restart();
             });
             Text label = CreateText("Label", buttonRect, 20, Ink, TextAnchor.MiddleCenter, FontStyle.Bold);
-            label.text = "HELP AGAIN";
+            label.text = "다시 지키기";
             Stretch(label.rectTransform, Vector2.zero, Vector2.one);
             resultPanel.gameObject.SetActive(false);
         }
