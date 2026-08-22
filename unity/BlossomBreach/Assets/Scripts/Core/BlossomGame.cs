@@ -50,23 +50,23 @@ namespace BlossomBreach
 
         [Header("Arena")]
         [SerializeField] private float spawnZ = 24f;
-        [SerializeField] private float breachZ = 1.5f;
+        [SerializeField] private float breachZ = -2.25f;
         [SerializeField] private float laneWidth = 2.25f;
         [SerializeField] private float enemyHeight = 0f;
 
         [Header("Screen-space Approach")]
         [SerializeField, Range(0f, 1f)] private float farViewportYMin = 0.78f;
         [SerializeField, Range(0f, 1f)] private float farViewportYMax = 0.88f;
-        [SerializeField, Range(0f, 1f)] private float nearViewportYMin = 0.42f;
-        [SerializeField, Range(0f, 1f)] private float nearViewportYMax = 0.55f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMin = 0.36f;
+        [SerializeField, Range(0f, 1f)] private float nearViewportYMax = 0.48f;
 
         [Header("Tuning")]
         [SerializeField] private int startingPurity = 100;
-        [SerializeField] private float scoutSpeed = 3.7f;
-        [SerializeField] private float fastSpeed = 5.35f;
-        [SerializeField] private float armoredSpeed = 2.8f;
-        [SerializeField] private float bomberSpeed = 3.25f;
-        [SerializeField] private float bossSpeed = 1.7f;
+        [SerializeField] private float scoutSpeed = 3.45f;
+        [SerializeField] private float fastSpeed = 5.12f;
+        [SerializeField] private float armoredSpeed = 2.55f;
+        [SerializeField] private float bomberSpeed = 3.05f;
+        [SerializeField] private float bossSpeed = 1.53f;
         [SerializeField] private float rayDistance = 100f;
         [SerializeField] private float comboHoldSeconds = 1.75f;
         [SerializeField] private float comboDecayStepSeconds = 0.55f;

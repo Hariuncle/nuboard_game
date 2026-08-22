@@ -16,6 +16,8 @@ namespace BlossomBreach
     [DisallowMultipleComponent]
     public sealed class GameBootstrap : MonoBehaviour
     {
+        private const float IntroSkipGraceSeconds = 1.5f;
+
         [Header("Optional opening movie")]
         [SerializeField] private bool playIntro = true;
         [SerializeField] private string introFileName = "h3-meadow-intro.mp4";
@@ -119,15 +121,12 @@ namespace BlossomBreach
             while (!skipIntro && !introFailed && !player.isPrepared && Time.realtimeSinceStartup < timeoutAt)
             {
                 UpdateMenuReticle(menuReticle);
-                if (WasIntroSkipPressed())
-                {
-                    skipIntro = true;
-                }
                 yield return null;
             }
 
             if (!skipIntro && !introFailed && player.isPrepared)
             {
+                Debug.Log("인트로 영상 준비 완료.");
                 if (player.audioTrackCount > 0)
                 {
                     player.EnableAudioTrack(0, true);
@@ -135,12 +134,23 @@ namespace BlossomBreach
                 }
 
                 player.Play();
+                Debug.Log("인트로 영상 재생 시작.");
+                float skipEnabledAt = Time.realtimeSinceStartup + IntroSkipGraceSeconds;
+                bool releaseObserved = false;
                 while (!skipIntro && !introFailed)
                 {
                     UpdateMenuReticle(menuReticle);
-                    if (WasIntroSkipPressed())
+                    if (Time.realtimeSinceStartup >= skipEnabledAt)
                     {
-                        skipIntro = true;
+                        if (!releaseObserved)
+                        {
+                            releaseObserved = !IsIntroSkipHeld();
+                        }
+                        else if (WasIntroSkipPressed())
+                        {
+                            skipIntro = true;
+                            Debug.Log("인트로 건너뛰기: 방아쇠를 놓은 뒤 새 입력을 감지했습니다.");
+                        }
                     }
                     yield return null;
                 }
@@ -322,7 +332,6 @@ namespace BlossomBreach
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = image;
-            button.onClick.AddListener(() => skipIntro = true);
 
             GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
             RectTransform labelRect = labelObject.GetComponent<RectTransform>();
@@ -350,6 +359,14 @@ namespace BlossomBreach
 
             return Touchscreen.current != null &&
                    Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+        }
+
+        private static bool IsIntroSkipHeld()
+        {
+            bool mouseHeld = Mouse.current != null && Mouse.current.leftButton.isPressed;
+            bool touchHeld = Touchscreen.current != null &&
+                             Touchscreen.current.primaryTouch.press.isPressed;
+            return mouseHeld || touchHeld;
         }
 
         private static Font GetUiFont()
