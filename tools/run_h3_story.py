@@ -9,7 +9,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-ROOT = Path("/home/work/media-lab-data/minimax-h3/runs/meadow-story")
+ROOT = Path("/home/work/media-lab-data/minimax-h3/runs/neon-breach-story")
 TEMPLATE = Path(
     "/home/work/media-lab-data/minimax-h3/workflows/"
     "minimax-h3-r2v-long-segment-guided-api.json"
@@ -19,52 +19,49 @@ COMFY_BIN = "/home/work/media-lab-data/minimax-h3/env/comfy-mcp/bin/comfy"
 
 SHOTS = (
     {
-        "slug": "01_bombardment",
-        "image": "meadow-intro-01.png",
-        "guide": "meadow-intro-01-guide.mp4",
-        "seed": 2026082211,
+        "slug": "01_alert",
+        "image": "nb-story-alert.jpg",
+        "guide": "nb-story-alert-guide.mp4",
+        "seed": 2026082201,
         "prompt": (
-            "Premium animated 3D fantasy game cinematic, use the reference as the exact first frame. "
-            "Pomora, the exact fluffy white cat queen in pink petal mantle and heart crown, continues "
-            "running toward camera with real weight while turning toward the blast. The explosion already "
-            "visible in the first frame expands into dirt, sparks, petals and a pressure wave while the "
-            "airborne acorn continues its fast spinning arc and the Bomber completes his follow-through. "
-            "Grass, fur, petals and water react physically. Fast low camera dolly with parallax and an impact "
-            "jolt, not a static pan or Ken Burns zoom. Preserve exact faces, outfits, meadow buildings "
-            "and props. No text, logo, watermark, morphing, extra limbs, or cuts."
+            "Premium stylized 3D sci-fi game cinematic. A dark navy neon training "
+            "arena locks down under sweeping red emergency strobes. The large "
+            "foreground Overseer drone powers on first, its magenta core pulses, "
+            "then the smaller drones wake in depth. Subtle controlled camera push "
+            "forward, coherent mechanical motion, cyan rim light, tense volumetric "
+            "haze. Preserve the exact arena and drone designs. No cuts, no text, no "
+            "logo, no watermark, no malformed limbs, no camera shake."
         ),
     },
     {
-        "slug": "02_rally",
-        "image": "meadow-intro-02.png",
-        "guide": "meadow-intro-02-guide.mp4",
-        "seed": 2026082212,
+        "slug": "02_comms",
+        "image": "nb-story-comms.jpg",
+        "guide": "nb-story-comms-guide.mp4",
+        "seed": 2026082202,
         "prompt": (
-            "Premium animated 3D fantasy game trailer, use the reference as the exact first frame. "
-            "Pomora completes one decisive forward command with her raised paw and a brave expression. "
-            "Thorn Knight holds the rose shield against one glowing impact while Berry Archer releases "
-            "the already-drawn flower arrow past camera. Fur, capes, ears and petals react to the shot. "
-            "Camera arcs quickly around "
-            "the trio with strong depth and parallax, no frozen portrait or simple zoom. Preserve exact "
-            "character identity, costumes, weapons and Blossom Meadow. No text, logo, watermark, face "
-            "morph, extra limbs, or cuts."
+            "Premium stylized 3D sci-fi game cinematic holographic transmission. "
+            "RIN urgently warns the player, maintaining the exact same face, short "
+            "silver-blue hair, magenta visor, navy-white armor and body proportions. "
+            "Natural subtle breathing and lip motion, one blink, restrained cyan "
+            "scanline shimmer and small hologram interference at the frame edges. "
+            "Slow stable push in, face sharp and unobscured. No redesign, no cuts, "
+            "no text, no logo, no watermark, no anatomy distortion."
         ),
     },
     {
-        "slug": "03_first_person",
-        "image": "meadow-intro-03.png",
-        "guide": "meadow-intro-03-guide.mp4",
-        "seed": 2026082213,
+        "slug": "03_breach",
+        "image": "nb-story-breach.jpg",
+        "guide": "nb-story-breach-guide.mp4",
+        "seed": 2026082203,
         "prompt": (
-            "Premium animated 3D fantasy first-person action cinematic, use the reference as the exact "
-            "first frame. The airborne Acorn Bomber continues his visible forward arc with clear body "
-            "rotation while the existing spinning acorn travels toward camera. Berry Archer releases her "
-            "already-drawn flower arrow at it. The first-person blossom blaster tracks the acorn through "
-            "the physical ring sight and fires one bright golden-pink cleansing pulse with controlled "
-            "recoil. The acorn bursts into harmless glowing petals; the flash expands into a circular "
-            "reticle and ends on a stable centered first-person gameplay view. Strong depth, character "
-            "motion and camera follow-through, no static zoom. Preserve exact characters, weapon and "
-            "meadow. No text, logo, watermark, deformed paws, morphing weapon, or cuts."
+            "Premium stylized 3D sci-fi action cinematic. Preserve RIN's exact "
+            "identity, silver-blue hair, magenta visor, navy-white cyan-lit armor and "
+            "compact pistol. She decisively finishes raising the weapon toward camera "
+            "and steadies her aim without firing. The cyan circular scanner glow grows "
+            "brighter from the perimeter and closes toward the lens as a clean "
+            "transition into first-person gameplay. Stable face and five-finger hand, "
+            "controlled camera push, no cuts, no muzzle flash, no text, no logo, no "
+            "watermark, no deformation."
         ),
     },
 )
@@ -101,7 +98,7 @@ def workflow_for(template, shot):
     graph["noise"]["inputs"]["noise_seed"] = shot["seed"]
     graph["schedule"]["inputs"]["steps"] = 8
     graph["video"]["inputs"]["fps"] = 24
-    graph["save"]["inputs"]["filename_prefix"] = f"meadow_story/{shot['slug']}"
+    graph["save"]["inputs"]["filename_prefix"] = f"neon_breach_story/{shot['slug']}"
     return graph
 
 
@@ -186,7 +183,7 @@ async def main():
                     "FETCHED", shot["slug"], content_text(fetched), flush=True
                 )
 
-    print("H3_MEADOW_ALL_DONE", flush=True)
+    print("H3_STORY_ALL_DONE", flush=True)
 
 
 if __name__ == "__main__":

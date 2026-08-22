@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#241713" />
+    <meta
+      name="description"
+      content="블루투스 블래스터로 악몽 포자를 정화하는 꽃의 왕국 슈팅 게임, BLOSSOM BREACH"
+    />
+    <title>BLOSSOM BREACH</title>
+    <link rel="stylesheet" href="./styles.css?v=3" />
+    <script type="module" src="./src/game.mjs?v=5"></script>
+  </head>
+  <body>
+    <main class="app-shell" id="app">
+      <section class="screen title-screen is-active" id="title-screen" aria-labelledby="game-title">
+        <div class="title-backdrop" aria-hidden="true"></div>
+        <div class="title-grid">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="status-dot"></span> MEADOW LINK // READY</p>
+            <h1 id="game-title"><span>BLOSSOM</span> BREACH</h1>
+            <p class="tagline">악몽 포자가 번진 꽃의 왕국을 조준 링크로 정화하세요.</p>
+            <p class="mission-copy">
+              포모라 여왕의 마지막 정화 사수로서 날아드는 포자 군집을 막고,
+              왕국의 <strong>꽃심장</strong>을 되살려야 합니다.
+            </p>
+            <div class="title-actions">
+              <button class="primary-button" id="start-button" type="button">
+                <span>정화 작전 시작</span><span aria-hidden="true">→</span>
+              </button>
+              <button class="ghost-button" id="brief-button" type="button" aria-haspopup="dialog">
+                왕국 브리핑
+              </button>
+            </div>
+            <div class="hardware-hint">
+              <span class="hardware-icon" aria-hidden="true">⌁</span>
+              <p><strong>총 콘솔은 BLE HID 마우스로 연결</strong><br />총을 움직여 조준점 이동 · 방아쇠로 발사</p>
+            </div>
+          </div>
+
+          <figure class="rin-card">
+            <div class="portrait-frame">
+              <img
+                src="./assets/images/pomora-character.png"
+                alt="꽃의 왕국을 지키는 포모라 여왕"
+                id="rin-portrait"
+              />
+              <div class="portrait-fallback" aria-hidden="true"><span>POMORA</span></div>
+              <span class="scanline" aria-hidden="true"></span>
+            </div>
+            <figcaption>
+              <span>QUEEN OF THE MEADOW</span>
+              <strong>POMORA // BLOOM GUIDE</strong>
+            </figcaption>
+          </figure>
+        </div>
+        <div class="sector-readout" aria-hidden="true">
+          <span>CLOVER_FIELD</span><span>BLOOM_GATE</span><span>HEART_GARDEN</span>
+        </div>
+      </section>
+
+      <section class="screen cutscene-screen" id="cutscene-screen" aria-label="오프닝 영상" hidden>
+        <div class="cutscene-chrome">
+          <span>MEADOW SIGNAL // POMORA</span>
+          <button class="skip-button" id="skip-button" type="button">클릭하여 건너뛰기</button>
+        </div>
+        <video
+          id="intro-video"
+          class="intro-video"
+          src="./assets/video/h3-meadow-intro.mp4?v=1"
+          poster="./assets/images/meadow-intro-01.png"
+          playsinline
+          preload="metadata"
+        ></video>
+        <div class="video-fallback" id="video-fallback" hidden>
+          <img src="./assets/images/meadow-intro-01.png" alt="" />
+          <p>꽃길 기록을 불러오지 못했습니다</p>
+          <strong>정화 작전을 바로 시작합니다…</strong>
+        </div>
+        <p class="transmission-label" aria-live="polite">MEADOW LINKED</p>
+      </section>
+
+      <section class="screen game-screen" id="game-screen" aria-label="BLOSSOM BREACH 플레이" hidden>
+        <div class="arena-backdrop" aria-hidden="true"></div>
+        <header class="hud" aria-label="게임 현황">
+          <div class="hud-cell score-cell">
+            <span>SCORE</span><strong id="score-value">000000</strong>
+          </div>
+          <div class="hud-cell combo-cell">
+            <span>CHAIN</span><strong id="combo-value">×1</strong>
+          </div>
+          <div class="hud-cell signal-cell">
+            <span>PURITY</span>
+            <div class="signal-track" role="progressbar" aria-label="정화 에너지" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+              <i id="signal-fill"></i>
+            </div>
+          </div>
+          <div class="hud-cell time-cell">
+            <span>TIME</span><strong id="time-value">60.0</strong>
+          </div>
+        </header>
+        <div class="boss-hud" id="boss-hud" hidden>
+          <span>NIGHTMARE SPORE</span>
+          <div class="boss-track" role="progressbar" aria-label="악몽 포자 체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <i id="boss-fill"></i>
+          </div>
+        </div>
+        <aside class="rin-comms" aria-label="포모라 안내 상태">
+          <img src="./assets/images/pomora-character.png" alt="" />
+          <div><span>GUIDANCE // POMORA</span><strong>BLOOM LINK</strong></div>
+        </aside>
+        <canvas id="game-canvas" aria-label="조준하여 악몽 포자를 정화하는 게임 영역"></canvas>
+        <p class="game-callout" id="game-callout" aria-live="polite"></p>
+        <div class="mobile-fire" aria-hidden="true">DRAG TO AIM // TAP TO CLEANSE</div>
+      </section>
+
+      <section class="result-overlay" id="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title" hidden>
+        <div class="result-card">
+          <p class="eyebrow" id="result-kicker">PURIFICATION COMPLETE</p>
+          <h2 id="result-title">MEADOW RESTORED</h2>
+          <p id="result-copy">악몽 포자를 몰아내고 꽃심장을 되살렸습니다.</p>
+          <dl class="result-stats">
+            <div><dt>SCORE</dt><dd id="result-score">0</dd></div>
+            <div><dt>ACCURACY</dt><dd id="result-accuracy">0%</dd></div>
+            <div><dt>MAX CHAIN</dt><dd id="result-combo">×1</dd></div>
+          </dl>
+          <button class="primary-button" id="replay-button" type="button">다시 정화</button>
+        </div>
+      </section>
+    </main>
+
+    <dialog class="brief-dialog" id="brief-dialog" aria-labelledby="brief-title">
+      <form method="dialog" class="brief-panel">
+        <header>
+          <div><p class="eyebrow">ROYAL NOTICE // MISSION 01</p><h2 id="brief-title">왕국 정화 브리핑</h2></div>
+          <button class="icon-button" value="cancel" aria-label="브리핑 닫기">×</button>
+        </header>
+        <img src="./assets/images/meadow-world-sheet.png" alt="꽃의 왕국 지도와 세 단계 정화 작전" id="storyboard-image" />
+        <ol class="brief-steps">
+          <li><span>01</span><div><strong>LINK</strong><p>총 콘솔을 연결하고 정화의 조준점을 깨우세요.</p></div></li>
+          <li><span>02</span><div><strong>PURIFY</strong><p>날아드는 악몽 포자를 정확히 맞혀 정화하세요.</p></div></li>
+          <li><span>03</span><div><strong>RESTORE</strong><p>거대 포자를 잠재워 왕국의 꽃심장을 되살리세요.</p></div></li>
+        </ol>
+      </form>
+    </dialog>
+
+    <noscript>이 게임을 실행하려면 JavaScript가 필요합니다.</noscript>
+  </body>
+</html>
