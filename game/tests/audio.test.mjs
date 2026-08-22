@@ -45,3 +45,34 @@ test("falls back safely when browser Audio is unavailable", async () => {
   assert.deepEqual(calls, ["unlock", "hit"]);
   assert.equal(audio.setMusic("meadow"), false);
 });
+
+test("a later user unlock retries the same music after autoplay rejection", async () => {
+  const musicAttempts = [];
+  let rejectFirstMusic = true;
+  class FakeAudio {
+    constructor(src) {
+      this.src = src;
+    }
+    cloneNode() { return new FakeAudio(this.src); }
+    play() {
+      if (!this.src.includes("bgm-")) return Promise.resolve();
+      musicAttempts.push(this.src);
+      if (rejectFirstMusic) {
+        rejectFirstMusic = false;
+        return Promise.reject(new Error("autoplay blocked"));
+      }
+      return Promise.resolve();
+    }
+    pause() {}
+  }
+  const audio = createGameAudio({
+    AudioClass: FakeAudio,
+    fallback: { unlock: async () => {}, play: () => false },
+  });
+
+  assert.equal(audio.setMusic("meadow"), true);
+  await Promise.resolve();
+  await audio.unlock();
+
+  assert.deepEqual(musicAttempts, [MUSIC_ASSETS.meadow, MUSIC_ASSETS.meadow]);
+});

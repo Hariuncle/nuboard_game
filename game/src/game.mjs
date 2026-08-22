@@ -35,14 +35,14 @@ const spriteSheets = Object.fromEntries(
 );
 
 const meadowSprites = [
-  { sheet: "raiders", source: [0, 45, 520, 625] },
-  { sheet: "raiders", source: [0, 760, 520, 630] },
-  { sheet: "minstrel", source: [0, 45, 535, 610] },
-  { sheet: "minstrel", source: [0, 760, 535, 620] },
-  { sheet: "support", source: [0, 30, 520, 640] },
-  { sheet: "support", source: [0, 750, 520, 640] },
-  { sheet: "defenders", source: [0, 40, 520, 640] },
-  { sheet: "defenders", source: [0, 745, 520, 645] },
+  { sheet: "raiders", source: [5, 0, 520, 570] },
+  { sheet: "raiders", source: [10, 710, 520, 550] },
+  { sheet: "minstrel", source: [0, 0, 550, 505] },
+  { sheet: "minstrel", source: [15, 825, 520, 370] },
+  { sheet: "support", source: [0, 35, 520, 550] },
+  { sheet: "support", source: [0, 740, 520, 500] },
+  { sheet: "defenders", source: [10, 245, 450, 410] },
+  { sheet: "defenders", source: [10, 955, 440, 370] },
 ];
 
 const ui = {
@@ -386,16 +386,15 @@ function drawDrone(x, y, radius, drone, isBoss, animation = {}) {
     context.arc(0, 0, radius * 0.24, 0, Math.PI * 2);
     context.fill();
   }
-  context.restore();
-
   const hp = numberFrom(drone, ["hp", "health"], 1);
   const maxHp = Math.max(1, numberFrom(drone, ["maxHp", "maxHealth"], hp));
-  if (maxHp > 1 && !isBoss && !animation.fallProgress) {
+  if (maxHp > 1 && !isBoss) {
     context.fillStyle = "rgba(0,0,0,.6)";
-    context.fillRect(x - radius, y + radius + 9, radius * 2, 4);
+    context.fillRect(-radius, radius + 9, radius * 2, 4);
     context.fillStyle = "#ff3fd2";
-    context.fillRect(x - radius, y + radius + 9, radius * 2 * (hp / maxHp), 4);
+    context.fillRect(-radius, radius + 9, radius * 2 * (hp / maxHp), 4);
   }
+  context.restore();
 }
 
 function drawCrosshair(x, y) {
@@ -522,6 +521,10 @@ export function dispatchControllerEvent(rawEvent) {
       rect.top + event.y * rect.height,
       rect,
     ));
+    return true;
+  }
+  if (event.type === "aimDelta") {
+    moveAim(event.dx, event.dy);
     return true;
   }
   if (event.type === "fire") {

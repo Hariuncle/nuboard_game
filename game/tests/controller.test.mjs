@@ -25,6 +25,15 @@ test('normalizes a fire signal to a protocol-free action event', () => {
   });
 });
 
+test('preserves finite relative aim deltas from a BLE HID bridge', () => {
+  assert.deepEqual(normalizeControllerEvent({ type: 'aimDelta', dx: -18, dy: 7 }), {
+    type: 'aimDelta',
+    dx: -18,
+    dy: 7,
+  });
+  assert.equal(normalizeControllerEvent({ type: 'aimDelta', dx: Number.NaN, dy: 0 }), null);
+});
+
 test('returns null for unsupported or malformed event types', () => {
   assert.equal(normalizeControllerEvent({ type: 'reload' }), null);
   assert.equal(normalizeControllerEvent({}), null);

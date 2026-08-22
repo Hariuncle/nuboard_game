@@ -18,6 +18,17 @@ export function normalizeControllerEvent(event) {
     };
   }
 
+  if (event.type === 'aimDelta') {
+    if (!Number.isFinite(event.dx) || !Number.isFinite(event.dy)) {
+      return null;
+    }
+    return {
+      type: 'aimDelta',
+      dx: event.dx,
+      dy: event.dy,
+    };
+  }
+
   if (event.type === 'fire') {
     return { type: 'fire' };
   }

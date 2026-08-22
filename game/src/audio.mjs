@@ -30,6 +30,7 @@ export function createGameAudio({
   const prototypes = new Map();
   let music = null;
   let musicName = null;
+  let requestedMusic = null;
 
   if (available) {
     for (const [name, source] of Object.entries(AUDIO_ASSETS)) {
@@ -40,8 +41,15 @@ export function createGameAudio({
     }
   }
 
-  async function unlock() {
-    await fallback.unlock?.();
+  function unlock() {
+    if (requestedMusic && !music) {
+      startMusic(requestedMusic.name, requestedMusic.loop);
+    }
+    try {
+      return Promise.resolve(fallback.unlock?.()).catch(() => {});
+    } catch {
+      return Promise.resolve();
+    }
   }
 
   function play(name) {
@@ -60,17 +68,23 @@ export function createGameAudio({
 
   function setMusic(name, { loop = true } = {}) {
     if (!available || !Object.hasOwn(MUSIC_ASSETS, name)) return false;
+    requestedMusic = { name, loop };
     if (musicName === name && music) return true;
-    stopMusic();
+    stopActiveMusic();
+    return startMusic(name, loop);
+  }
+
+  function startMusic(name, loop) {
     try {
-      music = new AudioClass(MUSIC_ASSETS[name]);
-      music.preload = "auto";
-      music.loop = loop;
-      music.volume = 0.32;
+      const candidate = new AudioClass(MUSIC_ASSETS[name]);
+      candidate.preload = "auto";
+      candidate.loop = loop;
+      candidate.volume = 0.32;
+      music = candidate;
       musicName = name;
-      const result = music.play();
+      const result = candidate.play();
       result?.catch?.(() => {
-        if (musicName === name) {
+        if (music === candidate) {
           music = null;
           musicName = null;
         }
@@ -84,6 +98,11 @@ export function createGameAudio({
   }
 
   function stopMusic() {
+    requestedMusic = null;
+    stopActiveMusic();
+  }
+
+  function stopActiveMusic() {
     try {
       music?.pause?.();
       if (music) music.currentTime = 0;

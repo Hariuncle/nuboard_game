@@ -139,7 +139,9 @@ export function tickGame(state, deltaSeconds) {
   const chapter = elapsed >= BOSS_SPAWN_SECONDS ? 3 : elapsed >= WAVE_TWO_SECONDS ? 2 : 1;
   const comboExpired =
     state.lastHitAt !== null && elapsed - state.lastHitAt > COMBO_WINDOW_SECONDS;
-  const drones = state.drones.map((drone) => moveDrone(drone, elapsed, delta));
+  const drones = state.drones
+    .map((drone) => moveDrone(drone, elapsed, delta))
+    .filter((drone) => drone.kind === 'boss' || isWithinViewport(drone));
 
   let next = {
     ...state,
@@ -186,6 +188,16 @@ function nearestHitIndex(drones, x, y, viewport) {
 
 function positiveDimension(value) {
   return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function isWithinViewport(drone) {
+  const radius = Math.max(0, Number.isFinite(drone.radius) ? drone.radius : 0);
+  return (
+    drone.x + radius >= 0 &&
+    drone.x - radius <= 1 &&
+    drone.y + radius >= 0 &&
+    drone.y - radius <= 1
+  );
 }
 
 function moveDrone(drone, elapsed, delta) {

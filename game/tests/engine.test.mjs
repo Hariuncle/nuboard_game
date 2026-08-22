@@ -84,6 +84,24 @@ test('fixed-world drone motion does not wrap across screen edges', () => {
   assert.equal(moved.drones[0].y, 0.5);
 });
 
+test('ordinary drones are retired only after moving fully beyond the fixed viewport', () => {
+  const partlyVisible = spawnDrone(createGameState(), {
+    x: 1.04,
+    y: 0.5,
+    vx: 0.01,
+    curve: 0,
+  });
+  const fullyGone = spawnDrone(createGameState(), {
+    x: 1.08,
+    y: 0.5,
+    vx: 0.01,
+    curve: 0,
+  });
+
+  assert.equal(tickGame(partlyVisible, 1).drones.length, 1);
+  assert.equal(tickGame(fullyGone, 1).drones.length, 0);
+});
+
 test('the default boss remains on-screen in the fixed world', () => {
   const state = spawnDrone(createGameState(), { kind: 'boss', curve: 0 });
 
