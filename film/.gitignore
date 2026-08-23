@@ -1,0 +1,5 @@
+shots/
+final/
+runs/
+*.part
+*.log
