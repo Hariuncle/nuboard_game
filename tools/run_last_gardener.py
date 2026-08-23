@@ -174,7 +174,11 @@ def all_shots() -> list[dict[str, Any]]:
                     "beat": beat,
                     "turbo": not hero,
                     "steps": 4 if not hero else 25,
-                    "ref_image_size": "match" if not hero else "max",
+                    # `match` is the official Ref2V Turbo training profile and
+                    # the safe baseline for the 75 GB KT fGPU partition. Hero
+                    # shots can be promoted to `max` only after a live A/B and
+                    # peak-VRAM check on a licensed environment.
+                    "ref_image_size": "match",
                     "seed": 219700000 + number,
                 }
             )
@@ -214,6 +218,76 @@ overall_soundscape:
 
 non_diegetic_music:
 {beat.music} The score develops across the fifteen seconds, supports rather than replaces the scene, and ends with an edit-friendly musical tail."""
+
+
+def production_plan(frame_dir: Path) -> dict[str, Any]:
+    """Export the complete editorial/generation contract without starting ComfyUI."""
+    shots = all_shots()
+    anchors = sorted({shot["anchor"] for shot in shots} | {shot["identity_anchor"] for shot in shots})
+    reference_files: dict[str, dict[str, Any]] = {}
+    for name in anchors:
+        path = frame_dir / name
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError(f"Reference image is missing or empty: {path}")
+        reference_files[name] = {
+            "path": str(path.resolve()),
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+
+    records: list[dict[str, Any]] = []
+    shot_duration = LENGTH / FPS
+    for shot in shots:
+        beat: Beat = shot["beat"]
+        start_frame = (shot["number"] - 1) * LENGTH
+        records.append(
+            {
+                "number": shot["number"],
+                "slug": shot["slug"],
+                "act": shot["act"],
+                "act_title": shot["act_title"],
+                "title": beat.title,
+                "timeline": {
+                    "start_frame": start_frame,
+                    "end_frame_exclusive": start_frame + LENGTH,
+                    "start_seconds": start_frame / FPS,
+                    "end_seconds": (start_frame + LENGTH) / FPS,
+                    "duration_seconds": shot_duration,
+                },
+                "generation": {
+                    "workflow": "MiniMax H3 Ref2VA",
+                    "width": WIDTH,
+                    "height": HEIGHT,
+                    "fps": FPS,
+                    "frames": LENGTH,
+                    "seed": shot["seed"],
+                    "turbo": shot["turbo"],
+                    "steps": shot["steps"],
+                    "ref_image_size": shot["ref_image_size"],
+                    "anchor": shot["anchor"],
+                    "identity_anchor": shot["identity_anchor"],
+                    "template_sha256": TEMPLATE_SHA256,
+                },
+                "editorial": {
+                    "action": beat.action,
+                    "camera": beat.camera,
+                    "dialogue": beat.dialogue or None,
+                    "sound": beat.sound,
+                    "music": beat.music,
+                },
+                "prompt": prompt_for(shot),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "title": "THE LAST GARDENER",
+        "status": "planned_not_generated",
+        "shot_count": len(records),
+        "runtime_seconds": len(records) * shot_duration,
+        "runtime_timecode_24fps": "00:15:05:00",
+        "reference_files": reference_files,
+        "shots": records,
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -761,9 +835,17 @@ def main() -> None:
     parser.add_argument("--frame-dir", type=Path, required=True)
     parser.add_argument("--start", type=int, default=1)
     parser.add_argument("--end", type=int, default=60)
+    parser.add_argument(
+        "--export-plan", type=Path,
+        help="Write the complete 60-shot production manifest without contacting ComfyUI",
+    )
     args = parser.parse_args()
     if not (1 <= args.start <= args.end <= 60):
         parser.error("shot range must satisfy 1 <= start <= end <= 60")
+    if args.export_plan:
+        atomic_write_json(args.export_plan.resolve(), production_plan(args.frame_dir.resolve()))
+        print("LAST_GARDENER_PLAN_EXPORTED", args.export_plan.resolve(), flush=True)
+        return
     asyncio.run(run(args.root, args.frame_dir, args.start, args.end))
 
 

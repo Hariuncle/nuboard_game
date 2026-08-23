@@ -46,6 +46,15 @@ The images are identity and staging references only. Motion, camera movement, di
 - Connective/action shots: official Ref2VA 4-step Turbo LoRA. The FL2VA 8-step LoRA belongs to the separate FL2VA workflow and must not be mixed into this Ref2VA template.
 - Memory ramp: validate 124 frames first, then 243, then 362. Only promote the 362-frame profile after ffprobe and peak-VRAM checks pass.
 
+### Recovery profile observed in AI Nexus
+
+- The terminated session record confirms `codex-val-media-image-20260822t021112z` ran for 22:15:42 with 0.5 fGPU, 16 CPU, and 96 GiB RAM.
+- The user-owned `removideo` VFolder persists. Its `minimax-h3/` directory contains `env/`, `models/`, `workflows/`, `inputs/`, `runs/`, `reports/`, and `production/`.
+- `minimax-h3/production/nuboard_game` contains only `.git`, so the interrupted shallow clone is not a usable checkout. A licensed recovery session should clone into a new explicit sibling path instead of deleting or resetting that directory.
+- AI Nexus recent history exposes a stronger production baseline: PyTorch NGC 25.11, one full H200 (`1.0 fGPU`), 12 CPU, 240 GiB RAM, and 12 GiB SHM. Prefer this profile for 362-frame Ref2VA if quota permits.
+- Mount the `removideo` VFolder with alias `media-lab-data` so the existing `/home/work/media-lab-data/minimax-h3/...` tool paths remain valid.
+- The committed offline generation contract is `film/shot_manifest.json`: 60 shots × 362 frames at 24 fps = 21,720 frames / 905 seconds (`00:15:05:00`).
+
 ## License gate
 
 MiniMax H3's public Community License lists the Republic of Korea as an Excluded Territory. The local open-weight workflow must therefore run only when KT Cloud or the operator can document a separate applicable licence/permission. The presence of model files in a former session is not by itself proof of that permission. Until this gate is documented, keep the workflow and assets ready but do not download or redeploy H3 weights into a new Korean-region session.
