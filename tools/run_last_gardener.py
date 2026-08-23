@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,16 @@ TEMPLATE_URL = (
 TEMPLATE_SHA256 = "45a3f213430d3b4db6bdbd1873f6b0c09ea81aafdfd0fd5ec2a26d355c5c5941"
 R2V_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
 WIDTH, HEIGHT, FPS, SECONDS, LENGTH = 1344, 768, 24, 15, 362
+SUCCESS_STATUSES = frozenset({"completed", "complete", "success", "succeeded", "done"})
+FAILURE_STATUSES = frozenset({"failed", "error", "cancelled", "canceled"})
+STATE_VERSION = 2
+MIN_FREE_BYTES = 1024**3
+EXPECTED_TEMPLATE_NODES = {
+    92: "SaveVideo", 115: "ResolutionSelector", 124: "BasicScheduler", 129: "RandomNoise",
+    132: "PrimitiveFloat", 136: "MiniMaxH3ReferenceToVideo", 137: "LoadImage",
+    138: "PrimitiveStringMultiline", 139: "LoadImage", 143: "PrimitiveInt",
+    144: "PrimitiveInt", 145: "LoraLoaderModelOnly", 146: "PrimitiveBoolean",
+}
 
 
 @dataclass(frozen=True)
@@ -205,6 +216,165 @@ non_diegetic_music:
 {beat.music} The score develops across the fifteen seconds, supports rather than replaces the scene, and ends with an edit-friendly musical tail."""
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def atomic_write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"version": STATE_VERSION, "jobs": {}, "completed": {}}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"State file is unreadable; refusing to overwrite {path}: {error}") from error
+    if not isinstance(state, dict) or not isinstance(state.get("jobs", {}), dict) or not isinstance(state.get("completed", {}), dict):
+        raise RuntimeError(f"State file has an invalid shape; refusing to overwrite {path}")
+    state["version"] = STATE_VERSION
+    state.setdefault("jobs", {})
+    state.setdefault("completed", {})
+    return state
+
+
+def completion_record(
+    path: Path, prompt_id: str, fingerprints: dict[str, Any], probe: dict[str, Any],
+) -> dict[str, Any]:
+    resolved = path.resolve()
+    return {
+        "path": str(resolved),
+        "sha256": sha256_file(resolved),
+        "prompt_id": prompt_id,
+        "fingerprints": fingerprints,
+        "probe": probe,
+    }
+
+
+def validated_completion(entry: Any, fingerprints: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(entry, dict) or entry.get("fingerprints") != fingerprints:
+        return None
+    path_value = entry.get("path")
+    expected_sha256 = entry.get("sha256")
+    if not isinstance(path_value, str) or not isinstance(expected_sha256, str):
+        return None
+    path = Path(path_value)
+    try:
+        if not path.is_file() or sha256_file(path) != expected_sha256:
+            return None
+        probe = verify_video(path)
+    except (OSError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+    return entry | {"path": str(path.resolve()), "probe": probe}
+
+
+def job_record(prompt_id: str, fingerprints: dict[str, Any]) -> dict[str, Any]:
+    return {"prompt_id": prompt_id, "fingerprints": fingerprints}
+
+
+def matching_prompt_id(entry: Any, fingerprints: dict[str, Any]) -> str | None:
+    if not isinstance(entry, dict) or entry.get("fingerprints") != fingerprints:
+        return None
+    prompt_id = entry.get("prompt_id")
+    return prompt_id if isinstance(prompt_id, str) and prompt_id else None
+
+
+def fingerprints_for(
+    template_sha256: str, workflow_path: Path, prompt: str, image_sha256: dict[str, str],
+) -> dict[str, Any]:
+    parts: dict[str, Any] = {
+        "template_sha256": template_sha256,
+        "workflow_sha256": sha256_file(workflow_path),
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        "input_sha256": dict(sorted(image_sha256.items())),
+    }
+    parts["fingerprint"] = canonical_sha256(parts)
+    return parts
+
+
+def merge_manifest(path: Path, entries: list[dict[str, Any]]) -> None:
+    existing: list[Any] = []
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Cannot safely merge existing manifest {path}: {error}") from error
+        if not isinstance(existing, list):
+            raise RuntimeError(f"Cannot safely merge non-list manifest {path}")
+
+    by_number: dict[int, dict[str, Any]] = {}
+    for entry in [*existing, *entries]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("number"), int):
+            raise RuntimeError(f"Invalid manifest entry in {path}: {entry!r}")
+        by_number[entry["number"]] = entry
+    atomic_write_json(path, [by_number[number] for number in sorted(by_number)])
+
+
+def validate_template_schema(template: dict[str, Any]) -> None:
+    nodes = template.get("nodes")
+    if not isinstance(nodes, list):
+        raise RuntimeError("Ref2VA template has no UI node list")
+    actual = {item.get("id"): item.get("type") for item in nodes if isinstance(item, dict)}
+    mismatches = {
+        node_id: {"expected": node_type, "actual": actual.get(node_id)}
+        for node_id, node_type in EXPECTED_TEMPLATE_NODES.items() if actual.get(node_id) != node_type
+    }
+    if mismatches:
+        raise RuntimeError(f"Ref2VA template node contract changed: {mismatches}")
+
+
+def _require_executable(command: str, label: str) -> None:
+    resolved = Path(command) if Path(command).is_absolute() else Path(shutil.which(command) or "")
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise RuntimeError(f"{label} executable is unavailable: {command}")
+
+
+def preflight_local(root: Path, frame_dir: Path, required_images: list[str], template: dict[str, Any]) -> None:
+    validate_template_schema(template)
+    _require_executable(MCP_BIN, "Comfy MCP")
+    _require_executable(COMFY_BIN, "comfy-cli")
+    _require_executable("ffprobe", "ffprobe")
+    if not frame_dir.is_dir():
+        raise RuntimeError(f"Reference frame directory does not exist: {frame_dir}")
+    if not os.access(root, os.W_OK):
+        raise RuntimeError(f"Generation root is not writable: {root}")
+    free = shutil.disk_usage(root).free
+    if free < MIN_FREE_BYTES:
+        raise RuntimeError(f"Generation root has less than 1 GiB free: {root} ({free} bytes)")
+    for name in required_images:
+        source = frame_dir / name
+        if not source.is_file() or source.stat().st_size == 0:
+            raise RuntimeError(f"Reference image is missing or empty: {source}")
+        if source.suffix.lower() == ".png":
+            with source.open("rb") as stream:
+                if stream.read(8) != b"\x89PNG\r\n\x1a\n":
+                    raise RuntimeError(f"Reference image is not a valid PNG file: {source}")
+
+
 def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url, timeout=60) as response:
@@ -213,7 +383,23 @@ def download(url: str, destination: Path, expected_sha256: str | None = None) ->
         actual = hashlib.sha256(data).hexdigest()
         if actual != expected_sha256:
             raise RuntimeError(f"SHA-256 mismatch for {url}: {actual}")
-    destination.write_bytes(data)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def ensure_template(url: str, destination: Path, expected_sha256: str) -> None:
+    if destination.is_file() and sha256_file(destination) == expected_sha256:
+        return
+    download(url, destination, expected_sha256)
 
 
 def text_content(result: Any) -> str:
@@ -298,22 +484,45 @@ def terminal_status(data: dict[str, Any]) -> str:
     return str(status or "").lower()
 
 
+class TerminalJobError(RuntimeError):
+    """A job definitely reached a failure state, so resubmission is safe."""
+
+
+class InvalidGeneratedOutput(RuntimeError):
+    """A completed job produced a file that failed deterministic media QC."""
+
+
 async def wait_for_job(session: ClientSession, prompt_id: str) -> dict[str, Any]:
     for _ in range(360):
         data = payload(await session.call_tool("job", {"action": "wait", "prompt_id": prompt_id, "timeout_seconds": 25}))
         status = terminal_status(data)
-        if status in {"completed", "success", "succeeded"}:
+        if status in SUCCESS_STATUSES:
             return data
-        if status in {"failed", "error", "cancelled", "canceled"}:
-            raise RuntimeError(f"H3 job {prompt_id} ended as {status}: {data}")
+        if status in FAILURE_STATUSES:
+            raise TerminalJobError(f"H3 job {prompt_id} ended as {status}: {data}")
         print("WAIT", prompt_id, status or "running", flush=True)
     raise TimeoutError(f"H3 job timed out: {prompt_id}")
 
 
+async def resume_job(session: ClientSession, prompt_id: str) -> dict[str, Any]:
+    data = payload(await session.call_tool("job", {"action": "status", "prompt_id": prompt_id}))
+    status = terminal_status(data)
+    if status in SUCCESS_STATUSES:
+        return data
+    if status in FAILURE_STATUSES:
+        raise TerminalJobError(f"H3 job {prompt_id} ended as {status}: {data}")
+    print("RESUME", prompt_id, status or "unknown", flush=True)
+    return await wait_for_job(session, prompt_id)
+
+
 def probe_video(path: Path) -> dict[str, Any]:
     command = [
-        "ffprobe", "-v", "error", "-show_entries",
-        "format=duration,size:stream=index,codec_name,codec_type,width,height,r_frame_rate,channels",
+        "ffprobe", "-v", "error", "-count_frames", "-show_entries",
+        (
+            "format=duration,size:stream="
+            "index,codec_name,codec_type,width,height,r_frame_rate,avg_frame_rate,"
+            "duration,nb_frames,nb_read_frames,sample_rate,channels"
+        ),
         "-of", "json", str(path),
     ]
     return json.loads(subprocess.check_output(command, text=True))
@@ -321,45 +530,128 @@ def probe_video(path: Path) -> dict[str, Any]:
 
 def verify_video(path: Path) -> dict[str, Any]:
     data = probe_video(path)
-    duration = float(data["format"]["duration"])
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
-    if duration < 14.8 or not video or not audio:
+    if not video or not audio:
         raise RuntimeError(f"Invalid H3 output {path}: {data}")
-    if (video.get("width"), video.get("height"), video.get("r_frame_rate")) != (WIDTH, HEIGHT, "24/1"):
-        raise RuntimeError(f"Wrong video geometry for {path}: {video}")
-    if int(audio.get("channels", 0)) < 2:
-        raise RuntimeError(f"H3 audio is not stereo for {path}: {audio}")
+
+    try:
+        format_duration = float(data["format"]["duration"])
+        video_duration = float(video["duration"])
+        audio_duration = float(audio["duration"])
+        frame_count = int(video.get("nb_read_frames") or video.get("nb_frames"))
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"Incomplete H3 stream metadata for {path}: {data}") from error
+
+    if min(format_duration, video_duration, audio_duration) < 14.8:
+        raise RuntimeError(f"Short H3 stream in {path}: {data}")
+    if abs(video_duration - audio_duration) > 0.25:
+        raise RuntimeError(f"H3 audio/video duration mismatch for {path}: {data}")
+    if frame_count != LENGTH:
+        raise RuntimeError(f"H3 output must contain {LENGTH} decoded frames, got {frame_count}: {path}")
+    if (
+        video.get("codec_name"), video.get("width"), video.get("height"),
+        video.get("r_frame_rate"), video.get("avg_frame_rate"),
+    ) != ("h264", WIDTH, HEIGHT, "24/1", "24/1"):
+        raise RuntimeError(f"Wrong H3 video format for {path}: {video}")
+    if (
+        audio.get("codec_name"), int(audio.get("sample_rate", 0)), int(audio.get("channels", 0)),
+    ) != ("aac", 32000, 2):
+        raise RuntimeError(f"Wrong H3 audio format for {path}: {audio}")
     return data
+
+
+def snapshot_mp4(directory: Path) -> dict[Path, tuple[int, int]]:
+    return {
+        path.resolve(): (path.stat().st_mtime_ns, path.stat().st_size)
+        for path in directory.rglob("*.mp4") if path.is_file()
+    }
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [item for child in value.values() for item in _strings(child)]
+    if isinstance(value, list):
+        return [item for child in value for item in _strings(child)]
+    return []
+
+
+def select_fetched_output(
+    fetched: dict[str, Any], fetched_dir: Path, slug: str, before: dict[Path, tuple[int, int]],
+) -> Path:
+    root = fetched_dir.resolve()
+    reported: set[Path] = set()
+    for value in _strings(fetched):
+        if not value.lower().endswith(".mp4") or value.startswith(("http://", "https://")):
+            continue
+        raw = Path(value)
+        candidates = [raw] if raw.is_absolute() else [root / raw, root / raw.name]
+        candidates.extend(root.rglob(raw.name))
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved.is_relative_to(root) and resolved.is_file() and resolved.stat().st_size > 0:
+                reported.add(resolved)
+
+    exact = sorted(path for path in reported if slug in path.name)
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise RuntimeError(f"fetch_outputs reported multiple MP4 files for {slug}: {exact}")
+
+    changed = sorted(
+        path.resolve() for path in fetched_dir.rglob("*.mp4")
+        if path.is_file() and path.stat().st_size > 0 and slug in path.name
+        and before.get(path.resolve()) != (path.stat().st_mtime_ns, path.stat().st_size)
+    )
+    if len(changed) == 1:
+        return changed[0]
+    if not changed:
+        raise RuntimeError(f"fetch_outputs did not identify a new MP4 for {slug}: {fetched}")
+    raise RuntimeError(f"Ambiguous new MP4 outputs for {slug}: {changed}; response={fetched}")
 
 
 async def run(root: Path, frame_dir: Path, start: int, end: int) -> None:
     root.mkdir(parents=True, exist_ok=True)
     template_path = root / "video_minimax_h3_r2v.json"
-    download(TEMPLATE_URL, template_path, TEMPLATE_SHA256)
+    ensure_template(TEMPLATE_URL, template_path, TEMPLATE_SHA256)
     template = json.loads(template_path.read_text(encoding="utf-8"))
 
     shots = [s for s in all_shots() if start <= s["number"] <= end]
     required_images = sorted({s["anchor"] for s in shots} | {s["identity_anchor"] for s in shots})
+    preflight_local(root, frame_dir, required_images, template)
+    image_sha256 = {name: sha256_file(frame_dir / name) for name in required_images}
     for name in required_images:
         source = frame_dir / name
-        if not source.exists():
-            raise FileNotFoundError(source)
-        shutil.copyfile(source, root / name)
+        destination = root / name
+        if source.resolve() != destination.resolve():
+            shutil.copyfile(source, destination)
 
     workflow_dir = root / "workflows"
     fetched_dir = root / "fetched"
     workflow_dir.mkdir(exist_ok=True)
     fetched_dir.mkdir(exist_ok=True)
     workflow_paths: dict[int, Path] = {}
+    shot_fingerprints: dict[int, dict[str, Any]] = {}
     manifest = []
     for shot in shots:
         path = workflow_dir / f"{shot['slug']}.json"
-        path.write_text(json.dumps(workflow_for(template, shot), ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, workflow_for(template, shot))
         workflow_paths[shot["number"]] = path
-        manifest.append({k: v for k, v in shot.items() if k != "beat"} | {"title": shot["beat"].title, "prompt": prompt_for(shot)})
-    (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        prompt = prompt_for(shot)
+        inputs = {name: image_sha256[name] for name in {shot["anchor"], shot["identity_anchor"]}}
+        fingerprints = fingerprints_for(TEMPLATE_SHA256, path, prompt, inputs)
+        shot_fingerprints[shot["number"]] = fingerprints
+        manifest.append(
+            {k: v for k, v in shot.items() if k != "beat"}
+            | {"title": shot["beat"].title, "prompt": prompt, "fingerprints": fingerprints}
+        )
+    merge_manifest(root / "manifest.json", manifest)
+
+    state_path = root / "state.json"
+    state = load_state(state_path)
 
     env = os.environ.copy()
     env.update(COMFY_BIN=COMFY_BIN, COMFY_LOCAL_URL=COMFY_URL)
@@ -380,46 +672,82 @@ async def run(root: Path, frame_dir: Path, start: int, end: int) -> None:
             upload_paths = [str(root / name) for name in required_images]
             print("UPLOAD", json.dumps(payload(await session.call_tool("upload_file", {"paths": upload_paths, "overwrite": True})), ensure_ascii=False), flush=True)
 
-            state_path = root / "state.json"
-            state = json.loads(state_path.read_text()) if state_path.exists() else {"jobs": {}, "completed": {}}
+            # Validate the entire selected range before the first expensive queue operation.
             for shot in shots:
-                slug = shot["slug"]
-                prior = state["completed"].get(slug)
-                if prior and Path(prior).exists():
-                    print("SKIP_COMPLETED", slug, prior, flush=True)
-                    continue
                 path = workflow_paths[shot["number"]]
                 validation = payload(await session.call_tool("validate_workflow", {"workflow_path": str(path)}))
                 if find_value(validation, "valid") is not True:
-                    raise RuntimeError(f"Validation failed for {slug}: {validation}")
-                print("VALID", slug, "turbo" if shot["turbo"] else "hero", flush=True)
+                    raise RuntimeError(f"Validation failed for {shot['slug']}: {validation}")
+                print("VALID", shot["slug"], "turbo" if shot["turbo"] else "hero", flush=True)
+
+            for shot in shots:
+                slug = shot["slug"]
+                fingerprints = shot_fingerprints[shot["number"]]
+                prior = validated_completion(state["completed"].get(slug), fingerprints)
+                if prior is not None:
+                    state["completed"][slug] = prior
+                    atomic_write_json(state_path, state)
+                    print("SKIP_COMPLETED", slug, prior["path"], flush=True)
+                    continue
+                if slug in state["completed"]:
+                    print("INVALIDATE_COMPLETED", slug, flush=True)
+                    del state["completed"][slug]
+                    atomic_write_json(state_path, state)
+
+                path = workflow_paths[shot["number"]]
+                stored_job = state["jobs"].get(slug)
+                prompt_id = matching_prompt_id(stored_job, fingerprints)
+                if stored_job is not None and prompt_id is None:
+                    raise RuntimeError(
+                        f"Untrusted or stale in-flight job for {slug}: {stored_job!r}. "
+                        "Inspect/cancel that prompt before removing its state entry; automatic resubmission could duplicate GPU work."
+                    )
 
                 last_error: Exception | None = None
                 for attempt in range(1, 4):
                     try:
-                        submitted = payload(await session.call_tool("run_workflow", {"workflow_path": str(path), "wait": False}))
-                        prompt_id = find_value(submitted, "prompt_id")
-                        if not isinstance(prompt_id, str) or not prompt_id:
-                            raise RuntimeError(f"prompt_id missing: {submitted}")
-                        state["jobs"][slug] = prompt_id
-                        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-                        print("QUEUED", slug, prompt_id, "attempt", attempt, flush=True)
-                        await wait_for_job(session, prompt_id)
-                        before = {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in fetched_dir.rglob("*.mp4")}
+                        if prompt_id is None:
+                            submitted = payload(await session.call_tool("run_workflow", {"workflow_path": str(path), "wait": False}))
+                            prompt_id = find_value(submitted, "prompt_id")
+                            if not isinstance(prompt_id, str) or not prompt_id:
+                                raise RuntimeError(f"prompt_id missing: {submitted}")
+                            state["jobs"][slug] = job_record(prompt_id, fingerprints)
+                            atomic_write_json(state_path, state)
+                            print("QUEUED", slug, prompt_id, "attempt", attempt, flush=True)
+
+                        await resume_job(session, prompt_id)
+                        before = snapshot_mp4(fetched_dir)
                         fetched = payload(await session.call_tool("fetch_outputs", {"prompt_id": prompt_id, "out_dir": str(fetched_dir)}))
-                        candidates = [p for p in fetched_dir.rglob("*.mp4") if p.stat().st_size > 0 and before.get(p) != (p.stat().st_mtime_ns, p.stat().st_size)]
-                        if not candidates:
-                            raise RuntimeError(f"No new MP4 fetched: {fetched}")
-                        output = max(candidates, key=lambda p: p.stat().st_mtime_ns)
-                        probe = verify_video(output)
-                        state["completed"][slug] = str(output)
-                        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                        output = select_fetched_output(fetched, fetched_dir, slug, before)
+                        try:
+                            probe = verify_video(output)
+                        except (RuntimeError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+                            raise InvalidGeneratedOutput(f"Completed job {prompt_id} produced invalid output {output}: {error}") from error
+                        state["completed"][slug] = completion_record(output, prompt_id, fingerprints, probe)
+                        state["jobs"].pop(slug, None)
+                        atomic_write_json(state_path, state)
                         print("VERIFIED", slug, output, json.dumps(probe), flush=True)
                         last_error = None
                         break
+                    except TerminalJobError as error:
+                        # A terminal failure cannot still consume GPU work, so a new submit is safe.
+                        last_error = error
+                        state["jobs"].pop(slug, None)
+                        atomic_write_json(state_path, state)
+                        prompt_id = None
+                        print("TERMINAL_RETRY", slug, attempt, repr(error), flush=True)
+                    except InvalidGeneratedOutput as error:
+                        # The prompt is completed, so replacing its bad output cannot duplicate live GPU work.
+                        last_error = error
+                        state["jobs"].pop(slug, None)
+                        atomic_write_json(state_path, state)
+                        prompt_id = None
+                        print("OUTPUT_RETRY", slug, attempt, repr(error), flush=True)
                     except Exception as error:  # retry slow GPU and transient MCP failures
                         last_error = error
-                        print("RETRY", slug, attempt, repr(error), flush=True)
+                        # Keep prompt_id: status/fetch failures are not proof that the GPU job stopped.
+                        print("RESUME_RETRY", slug, attempt, prompt_id, repr(error), flush=True)
+                    if attempt < 3:
                         await asyncio.sleep(5)
                 if last_error:
                     raise last_error

@@ -33,16 +33,22 @@ The images are identity and staging references only. Motion, camera movement, di
 
 ## KT Cloud generation profile
 
-- Session: `codex-val-media-image-20260822t021112z`
+- Intended environment: `codex-val-media-image-20260822t021112z` (last observed stopped/absent from the running-session list on 2026-08-23; do not reuse the unrelated `remo-test-*` session)
 - GPU visible to container: NVIDIA H200, 75.38 GB VRAM (0.5 fGPU partition)
+- Allocation target: 16 CPU / 96 GiB RAM. The currently unrelated running session exposes 6 CPU / 64 GiB and does not contain the H3 model directory, so it is not a production substitute.
 - ComfyUI: 0.33.0; template package 0.11.41
 - PyTorch: 2.10.0 + CUDA 13.0
 - Comfy MCP: 0.10.0; comfy-cli: 1.17.0; MCP SDK: 2.0.0
 - FL2VA / Ref2VA: INT8 ConvRot for stable 15-second 768p generation on the partition
 - Text encoder: Qwen3-VL-32B NVFP4 AWQ
 - Video VAE FP16 + Audio VAE FP32
-- Hero shots: 20 steps, turbo disabled
-- Connective/action shots: official 8-step FL2V Turbo LoRA
+- Hero shots: 25 steps, turbo disabled; start with `ref_image_size=match` and promote only identity-critical closeups after an A/B test.
+- Connective/action shots: official Ref2VA 4-step Turbo LoRA. The FL2VA 8-step LoRA belongs to the separate FL2VA workflow and must not be mixed into this Ref2VA template.
+- Memory ramp: validate 124 frames first, then 243, then 362. Only promote the 362-frame profile after ffprobe and peak-VRAM checks pass.
+
+## License gate
+
+MiniMax H3's public Community License lists the Republic of Korea as an Excluded Territory. The local open-weight workflow must therefore run only when KT Cloud or the operator can document a separate applicable licence/permission. The presence of model files in a former session is not by itself proof of that permission. Until this gate is documented, keep the workflow and assets ready but do not download or redeploy H3 weights into a new Korean-region session.
 
 ## Acceptance gates
 
